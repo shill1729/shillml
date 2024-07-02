@@ -4,4 +4,4 @@ numpy~=2.0.0
 scipy~=1.13.1
 sympy~=1.12.1
 setuptools~=68.2.0
-git+https://github.com/shill1729/sdepy.git@master
+git+https://github.com/shill1729/sdepy.git@master#egg=sdepy
