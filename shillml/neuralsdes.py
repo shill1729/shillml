@@ -165,14 +165,14 @@ if __name__ == "__main__":
     x0 = torch.tensor(x00, dtype=torch.float32)
     x0np = np.array(x00)
     tn = 10.
-    ntime = 8000
+    ntime = 1000
     ntrain = 1000
     npaths = 10
     npaths_fit = 30
     seed = 17
     lr = 0.0001
     weight_decay = 0.
-    epochs = 9000
+    epochs = 1000
     hidden_dim = [8, 8]
     printfreq = 100
     drift_act = nn.Tanh()
