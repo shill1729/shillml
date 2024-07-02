@@ -1,4 +1,4 @@
-from typing import List, Callable, Optional
+from typing import List, Callable, Optional, Any
 
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
@@ -38,7 +38,7 @@ class FeedForwardNeuralNet(nn.Module):
             Tie the weights of this network to another network via tranpose (but not the biases).
     """
 
-    def __init__(self, neurons: List[int], activations: List[Optional]):
+    def __init__(self, neurons: List[int], activations: List[Optional[Callable[..., Any]]]):
         """
         Initializes the FeedForwardNeuralNet with the given neurons and activation functions.
 
