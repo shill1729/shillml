@@ -1,12 +1,12 @@
-import torch
-import torch.nn as nn
+from typing import List, Callable, Optional
+
 import torch.nn.functional as F
-
-from typing import List, Callable
-
 import matplotlib.pyplot as plt
+import torch.nn as nn
 import numpy as np
+
 import time
+import torch
 
 
 # define function to set device
@@ -38,7 +38,7 @@ class FeedForwardNeuralNet(nn.Module):
             Tie the weights of this network to another network via tranpose (but not the biases).
     """
 
-    def __init__(self, neurons: List[int], activations: List[Callable]):
+    def __init__(self, neurons: List[int], activations: List[Optional]):
         """
         Initializes the FeedForwardNeuralNet with the given neurons and activation functions.
 
@@ -299,8 +299,10 @@ def test_jacobian_shapes():
     print("Single input results close:", torch.allclose(jacobian_single_auto, jacobian_single_explicit, atol=1e-5))
     print("Batched input results close:", torch.allclose(jacobian_batched_auto, jacobian_batched_explicit, atol=1e-5))
 
-    assert torch.allclose(jacobian_single_auto, jacobian_single_explicit, atol=1e-5), "faied Autograd Jacobian and Explicit Jabocian match"
-    assert torch.allclose(jacobian_batched_auto, jacobian_batched_explicit, atol=1e-5), "failed Batched Autograd Jacobian and Explicit Jabocian match"
+    assert torch.allclose(jacobian_single_auto, jacobian_single_explicit,
+                          atol=1e-5), "faied Autograd Jacobian and Explicit Jabocian match"
+    assert torch.allclose(jacobian_batched_auto, jacobian_batched_explicit,
+                          atol=1e-5), "failed Batched Autograd Jacobian and Explicit Jabocian match"
     print(net.jacobian_network(x_single))
     print(net.jacobian_network_for_paths(x_single.unsqueeze(0)))
 

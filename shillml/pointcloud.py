@@ -1,9 +1,9 @@
 import sympy as sp
 import numpy as np
 from typing import Callable, Tuple, List
-from sdepy.sdes import SDE
 
-from sampler import ImportanceSampler
+from shillml.sdes import SDE
+from shillml.sampler import ImportanceSampler
 
 
 class PointCloud:

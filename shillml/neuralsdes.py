@@ -3,21 +3,24 @@
 import torch
 import torch.nn as nn
 from shillml.ffnn import FeedForwardNeuralNet
+from typing import List, Callable
 
 
-def log_det_cov(cov):
+def log_det_cov(cov: torch.Tensor, epsilon: float = 10 ** -6):
     """
     The logarithm of the determinant of a covariance matrix
+
     :param cov:
+    :param epsilon:
     :return:
     """
     det = torch.linalg.det(cov)
-    return torch.log(torch.abs(det)+0.00001)
+    return torch.log(torch.abs(det) + epsilon)
 
 
-def mahalanobis_dist_sq(x, mu, cov):
+def mahalanobis_distance(x: torch.Tensor, mu: torch.Tensor, cov: torch.Tensor):
     """
-    The Mahalanobis distance squared
+    The Mahalanobis distance
 
     :param x:
     :param mu:
@@ -27,10 +30,10 @@ def mahalanobis_dist_sq(x, mu, cov):
     inverse_covariance = torch.linalg.inv(cov)
     z = x - mu
     quadratic_form = torch.einsum('Ntk, Ntkl, Ntl -> Nt', z, inverse_covariance, z)
-    return quadratic_form
+    return torch.sqrt(quadratic_form)
 
 
-def gaussian_nll(x, mu, cov):
+def gaussian_nll(x: torch.Tensor, mu: torch.Tensor, cov: torch.Tensor):
     """
     The NLL of the conditional Gaussian resulting from the Euler-Maruyama scheme
     :param x:
@@ -39,16 +42,16 @@ def gaussian_nll(x, mu, cov):
     :return:
     """
     log_det_term = log_det_cov(cov)
-    nll = 0.5 * (mahalanobis_dist_sq(x, mu, cov) + log_det_term)
+    nll = 0.5 * (mahalanobis_distance(x, mu, cov) ** 2 + log_det_term)
     return nll.squeeze(-1).sum()
 
 
-def euler_maruyama_nll(x, mu, cov, h):
+def euler_maruyama_nll(x: torch.Tensor, mu: torch.Tensor, cov: torch.Tensor, h: float):
     """
     The Euler-Maruyama NLL
     :param x: tensor of shape (N, n, d)
     :param mu: tensor of shape (N, n, d)
-    :param sigma: tensor of shape (N, n, d, m)
+    :param cov: tensor of shape (N, n, d, m)
     :param h: float
     :return:
     """
@@ -56,17 +59,18 @@ def euler_maruyama_nll(x, mu, cov, h):
     x2 = x[:, 1:, :]
     drift = h * mu
     cov1 = h * cov
-    loss = gaussian_nll(x2-x1, drift, cov1)
+    loss = gaussian_nll(x2 - x1, drift, cov1)
     return loss
 
 
-def noncentral_chi_sq_log_likelihood(q, lam):
+def noncentral_chi_sq_log_likelihood(q: torch.Tensor, lam: torch.Tensor):
     log_f = -0.5 * (q + lam) - 0.5 * torch.log(q) + torch.log(torch.cosh(torch.sqrt(lam * q)))
     return log_f
 
 
 class NeuralSDE(nn.Module):
-    def __init__(self, state_dim, hidden_dim, drift_act, diffusion_act, noise_dim, *args, **kwargs):
+    def __init__(self, state_dim: int, hidden_dim: List[int], drift_act: Callable, diffusion_act: Callable,
+                 noise_dim: int, *args, **kwargs):
         """
         A neural stochastic differential equation model.
 
@@ -88,7 +92,7 @@ class NeuralSDE(nn.Module):
         self.drift_net = FeedForwardNeuralNet(neurons_mu, activations_mu)
         self.diffusion_net = FeedForwardNeuralNet(neurons_sigma, activations_sigma)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         """
 
         :param x:
@@ -102,7 +106,7 @@ class NeuralSDE(nn.Module):
         cov = torch.einsum('Ntik,Ntjk->Ntij', sigma, sigma)
         return mu, cov
 
-    def mu_fit(self, t, x):
+    def mu_fit(self, t: float, x: torch.Tensor):
         """
 
         :param t:
@@ -113,7 +117,7 @@ class NeuralSDE(nn.Module):
             x = torch.tensor(x, dtype=torch.float32)
             return self.drift_net(x).detach().numpy()
 
-    def sigma_fit(self, t, x):
+    def sigma_fit(self, t: float, x: torch.Tensor):
         """
 
         :param t:
@@ -124,7 +128,8 @@ class NeuralSDE(nn.Module):
             x = torch.tensor(x, dtype=torch.float32)
             return self.diffusion_net(x).view((self.state_dim, self.noise_dim)).detach().numpy()
 
-    def fit(self, ensemble, lr, epochs, printfreq=100, h=1 / 252, weight_decay=0., scheme="em"):
+    def fit(self, ensemble: torch.Tensor, lr: float, epochs: int, printfreq: int = 100, h: float = 1 / 252,
+            weight_decay: float = 0.):
         optimizer = torch.optim.Adam(params=self.parameters(), lr=lr, weight_decay=weight_decay)
         for epoch in range(epochs + 1):
             optimizer.zero_grad()
