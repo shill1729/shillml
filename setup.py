@@ -1,11 +1,17 @@
-from setuptools import setup
+from setuptools import setup, find_packages
+
+
+def parse_requirements(filename):
+    with open(filename, 'r') as f:
+        return f.read().splitlines()
+
 
 setup(
     name='shillml',
-    version='0.0.1',
+    version='0.0.2',
     packages=['shillml'],
     url='https://github.com/shill1729/shillml',
-    requires=["numpy", "matplotlib", "torch"],
+    install_requires=parse_requirements("requirements.txt"),
     license='MIT',
     author='Sean Hill',
     author_email='52792611+shill1729@users.noreply.github.com',
