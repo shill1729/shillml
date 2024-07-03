@@ -165,6 +165,41 @@ class FeedForwardNeuralNet(nn.Module):
 
         return J
 
+    def hessian_network(self, x: torch.Tensor):
+        """
+        Computes the Hessian matrix of the network's output with respect to its input.
+
+        Args:
+            x (torch.Tensor): The input tensor to the network of shape (n, d),
+                              where n is the batch size and d is the input dimension.
+
+        Returns:
+            torch.Tensor: A tensor representing the Hessian matrix of the network's output
+                          with respect to the input, of shape (n, self.output_dim, d, d).
+        """
+        n, d = x.shape
+        x.requires_grad_(True)
+        y = self.forward(x)
+
+        hessians = []
+        for i in range(self.output_dim):
+            # Compute first-order gradients
+            first_grads = torch.autograd.grad(y[:, i].sum(), x, create_graph=True)[0]
+
+            # Compute second-order gradients (Hessian)
+            hessian_rows = []
+            for j in range(d):
+                hessian_row = torch.autograd.grad(first_grads[:, j].sum(), x, retain_graph=True)[0]
+                hessian_rows.append(hessian_row)
+
+            hessian = torch.stack(hessian_rows, dim=1)
+            hessians.append(hessian)
+
+        # Stack Hessians for each output dimension
+        hessians = torch.stack(hessians, dim=1)
+
+        return hessians
+
     def jacobian_network_for_paths(self, x: torch.Tensor):
         """
         Computes the Jacobian matrix of the network's output with respect to its input.
@@ -416,6 +451,25 @@ def test_jacobian_performance():
         print(f"Batch size {batch_size}: Speedup = {speedup[i]:.2f}x")
 
 
+def test_hessian_network():
+    # Create a simple network
+    net = FeedForwardNeuralNet([2, 3, 2], [F.relu, F.tanh, None])
+
+    # Create a batch of inputs
+    x = torch.randn(5, 2, requires_grad=True)
+
+    # Compute Hessian
+    hessian = net.hessian_network(x)
+
+    # Check shape
+    assert hessian.shape == (5, 2, 2, 2), f"Expected shape (5, 2, 2, 2), got {hessian.shape}"
+
+    # Check symmetry
+    assert torch.allclose(hessian, hessian.transpose(2, 3)), "Hessian is not symmetric"
+
+    print("Hessian test passed")
+
+
 # Run the tests
 if __name__ == "__main__":
     test_feed_forward_neural_net()
@@ -423,3 +477,4 @@ if __name__ == "__main__":
     test_jacobian_shapes()
     test_weight_tying()
     test_jacobian_performance()
+    test_hessian_network()
