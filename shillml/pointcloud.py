@@ -7,7 +7,7 @@ from shillml.sampler import ImportanceSampler
 
 
 class PointCloud:
-    def __init__(self, phi: Callable, params: List[sp.Symbol], bounds: List[Tuple[float, float]],
+    def __init__(self, phi: Callable, params: List[sp.Symbol], bounds: List[Tuple],
                  drift: Callable = None, diffusion: Callable = None):
 
         """
@@ -50,7 +50,7 @@ class PointCloud:
             self.extrinsic_drift = self._compute_extrinsic_drift()
             self.extrinsic_covariance = self._compute_extrinsic_covariance()
             self.np_extrinsic_drift = self._sympy_to_numpy(self.extrinsic_drift)
-            self.np_extrinsic_diffusion = self._sympy_to_numpy(self.jacobian*self.diffusion)
+            self.np_extrinsic_diffusion = self._sympy_to_numpy(self.jacobian * self.diffusion)
             self.np_extrinsic_covariance = self._sympy_to_numpy(self.extrinsic_covariance)
 
             self._create_sdes()
@@ -84,8 +84,10 @@ class PointCloud:
         return self.jacobian * self.bb_T * self.jacobian.T
 
     def _create_sdes(self):
-        self.latent_sde = SDE(lambda t,x: self.np_drift(*x).reshape(self.dimension), lambda t,x: self.np_diffusion(*x))
-        self.ambient_sde = SDE(lambda t,x: self.np_extrinsic_drift(*x).reshape(self.target_dim), lambda t,x: self.np_extrinsic_diffusion(*x))
+        self.latent_sde = SDE(lambda t, x: self.np_drift(*x).reshape(self.dimension),
+                              lambda t, x: self.np_diffusion(*x))
+        self.ambient_sde = SDE(lambda t, x: self.np_extrinsic_drift(*x).reshape(self.target_dim),
+                               lambda t, x: self.np_extrinsic_diffusion(*x))
         return None
 
     def generate(self, n: int = 1000, seed=None) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -163,7 +165,7 @@ class PointCloud:
 
         # Compute smallest singular values
         largest_singvals = np.array([np.linalg.svd(cov, compute_uv=False)[0]
-                                      for cov in covariances])
+                                     for cov in covariances])
 
         fig = plt.figure(figsize=figsize)
         ax = fig.add_subplot(111, projection='3d')
@@ -185,6 +187,7 @@ class PointCloud:
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import numpy as np
+
     tn = 1
     ntime = 1000
     npaths = 50
@@ -218,9 +221,10 @@ if __name__ == "__main__":
         params[0] ** 2 - params[1] ** 2
     )
 
+
     # Define drift and diffusion (same for all surfaces in this example)
     def drift(params):
-        return sp.Matrix([-sp.sin(params[0])+params[1]**2-1, sp.exp(-params[1])])
+        return sp.Matrix([-sp.sin(params[0]) + params[1] ** 2 - 1, sp.exp(-params[1])])
         # return sp.Matrix([0, 0])
 
 
@@ -256,10 +260,10 @@ if __name__ == "__main__":
         axs[0].set_title(f'{name} - Drift Vector Field')
         plt.colorbar(scatter, ax=axs[0], label='Weight')
         # Generate latent paths:
-        paths1 = cloud.latent_sde.sample_ensemble(param_samples[0,:], tn=tn, ntime=ntime, npaths=npaths, noise_dim=2)
-        paths = np.zeros((npaths, ntime+1, 3))
+        paths1 = cloud.latent_sde.sample_ensemble(param_samples[0, :], tn=tn, ntime=ntime, npaths=npaths, noise_dim=2)
+        paths = np.zeros((npaths, ntime + 1, 3))
         for j in range(npaths):
-            for i in range(ntime+1):
+            for i in range(ntime + 1):
                 paths[j, i, :] = np.squeeze(cloud.np_phi(*paths1[j, i, :]))
         # Plot covariance coloring
         largest_singvals = np.array([np.linalg.svd(cov, compute_uv=False)[0] for cov in extrinsic_covariances])
