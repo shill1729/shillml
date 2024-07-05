@@ -108,7 +108,7 @@ class PointCloud:
             extrinsic_drifts = None
             extrinsic_covariances = None
 
-        return points, weights, extrinsic_drifts, extrinsic_covariances, param_samples
+        return points.squeeze(), weights, extrinsic_drifts, extrinsic_covariances, param_samples
 
     def plot_point_cloud(self, points=None, weights=None, drifts=None, plot_drift=False,
                          drift_scale=1.0, alpha=0.5, figsize=(10, 8)):
