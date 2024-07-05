@@ -108,7 +108,7 @@ class PointCloud:
             extrinsic_drifts = None
             extrinsic_covariances = None
 
-        return points.squeeze(), weights, extrinsic_drifts, extrinsic_covariances, param_samples
+        return points.squeeze(), weights, extrinsic_drifts.squeeze(), extrinsic_covariances, param_samples
 
     def plot_point_cloud(self, points=None, weights=None, drifts=None, plot_drift=False,
                          drift_scale=1.0, alpha=0.5, figsize=(10, 8)):
@@ -248,9 +248,7 @@ if __name__ == "__main__":
     # Create plots
     for cloud, name in zip(clouds, surface_names):
         fig, axs = plt.subplots(1, 2, figsize=(12, 8), subplot_kw={'projection': '3d'})
-
         points, weights, extrinsic_drifts, extrinsic_covariances, param_samples = cloud.generate(n=n)
-
         # Plot drift vector field
         sizes = 50 * weights / np.max(weights)
         scatter = axs[0].scatter(points[:, 0], points[:, 1], points[:, 2], s=sizes, alpha=0.5, c=weights)
