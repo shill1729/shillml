@@ -55,7 +55,7 @@ class FeedForwardNeuralNet(nn.Module):
         for i in range(len(neurons) - 1):
             self.layers.append(nn.Linear(neurons[i], neurons[i + 1]))
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Defines the forward pass of the neural network.
 
