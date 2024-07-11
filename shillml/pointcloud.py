@@ -1,7 +1,7 @@
 import sympy as sp
 import numpy as np
 from typing import Callable, Tuple, List
-
+import matplotlib.pyplot as plt
 from shillml.sdes import SDE
 from shillml.sampler import ImportanceSampler
 
