@@ -352,6 +352,9 @@ class RiemannianManifold:
             equations.append(eq)
         return equations
 
+    def sympy_to_numpy(self, expr):
+        return sp.lambdify(self.local_coordinates, expr, modules='numpy')
+
 
 if __name__ == "__main__":
     u, v = sp.symbols("u v", real=True)
