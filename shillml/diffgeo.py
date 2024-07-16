@@ -3,7 +3,7 @@ from typing import List
 import sympy as sp
 from sympy import Matrix, MutableDenseNDimArray
 
-from symcalc import matrix_divergence
+from shillml.symcalc import matrix_divergence
 
 
 class RiemannianManifold:
