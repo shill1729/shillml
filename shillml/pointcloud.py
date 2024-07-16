@@ -18,7 +18,7 @@ class PointCloud:
                 :param bounds: List of (min, max) tuples for each parameter
                 :param drift: A function that takes params and returns the drift vector (optional)
                 :param diffusion: A function that takes params and returns the diffusion matrix (optional)
-                """
+        """
         self.phi = phi
         self.params = params
         self.bounds = bounds
