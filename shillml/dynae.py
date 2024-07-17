@@ -264,7 +264,7 @@ class LatentNeuralSDE(nn.Module):
         """ For numpy EM SDE solvers"""
         d = z.shape[0]
         with torch.no_grad():
-            return self.diffusion_net(torch.tensor(z, dtype=torch.float32)).view((d,d)).detach().numpy()
+            return self.diffusion_net(torch.tensor(z, dtype=torch.float32)).view((d, d)).detach().numpy()
 
     def sample_paths(self, z0: np.ndarray, tn: float, ntime: int, npaths: int) -> np.ndarray:
         """
@@ -336,8 +336,9 @@ class AutoEncoderDiffusion(AutoEncoderDiffusionGeometry):
     def __init__(self, latent_sde: LatentNeuralSDE, ae: AutoEncoder, *args, **kwargs):
         super().__init__(latent_sde, ae, *args, **kwargs)
 
-    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, Tensor]:
+    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         z, dphi, b, q = self.compute_sde_manifold_tensors(x)
+        bbt = torch.bmm(b, b.mT)
         ambient_diffusion = torch.bmm(dphi, b)
         cov_model = torch.bmm(ambient_diffusion, ambient_diffusion.mT)
         # Normal Bundle Penalty
@@ -346,7 +347,7 @@ class AutoEncoderDiffusion(AutoEncoderDiffusionGeometry):
         P = torch.bmm(torch.bmm(dphi, g_inv), dphi.mT)
         N = torch.eye(self.extrinsic_dim).expand(x.shape[0], self.extrinsic_dim, self.extrinsic_dim) - P
         # Exact normal term
-        return cov_model, N, q
+        return cov_model, N, q, bbt
 
 
 class AutoEncoderDrift(AutoEncoderDiffusionGeometry):
@@ -360,9 +361,6 @@ class AutoEncoderDrift(AutoEncoderDiffusionGeometry):
         tangent_drift = torch.bmm(dphi, a.unsqueeze(2)).squeeze()
         mu_model = tangent_drift + 0.5 * q
         return mu_model
-
-
-
 
 
 def fit_model(model: nn.Module,
@@ -469,6 +467,7 @@ class TBAELoss(nn.Module):
                       self.tangent_bundle_weight * self.tangent_bundle_reg(model_projection, self.observed_projection))
         return total_loss
 
+
 class CTBAELoss(nn.Module):
     def __init__(self, contractive_weight=1., tangent_bundle_weight=1., observed_projection=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -482,7 +481,7 @@ class CTBAELoss(nn.Module):
     def forward(self, output, x):
         x_hat, dpi, model_projection = output
         mse = self.mse_loss(x_hat, x)
-        contr = self.contractive_reg(dpi)*self.contractive_weight
+        contr = self.contractive_reg(dpi) * self.contractive_weight
         tang = self.tangent_bundle_weight * self.tangent_bundle_reg(model_projection, self.observed_projection)
         total_loss = mse + contr + tang
         return total_loss
@@ -538,17 +537,18 @@ class DiffusionLoss(nn.Module):
     def forward(self, model_output, targets):
         """
 
-        :param model_output:
-        :param targets:
+        :param model_output: (model_cov, normal_proj, qv, bbt)
+        :param targets: (observed_cov, ambient_drift, encoded_observed_cov)
         :return:
         """
-        model_cov, normal_proj, qv = model_output
-        observed_cov, ambient_drift = targets
+        model_cov, normal_proj, qv, bbt = model_output
+        observed_cov, ambient_drift, encoded_observed_cov = targets
         tangent_vector = ambient_drift - 0.5 * qv
         normal_proj_vector = torch.bmm(normal_proj, tangent_vector.unsqueeze(2))
         cov_mse = self.cov_mse(model_cov, observed_cov)
+        local_cov_mse = self.cov_mse(bbt, encoded_observed_cov)
         normal_bundle_loss = self.normal_bundle_loss(normal_proj_vector)
-        total_loss = cov_mse + self.normal_bundle_weight * normal_bundle_loss
+        total_loss = cov_mse + local_cov_mse + self.normal_bundle_weight * normal_bundle_loss
         return total_loss
 
     def extra_repr(self) -> str:

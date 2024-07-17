@@ -1,9 +1,11 @@
-from typing import List
-
+from typing import List, Callable
+import numpy as np
 import sympy as sp
-from sympy import Matrix, MutableDenseNDimArray
+import matplotlib.pyplot as plt
 
+from sympy import Matrix, MutableDenseNDimArray
 from shillml.symcalc import matrix_divergence
+from shillml.sdes import SDE
 
 
 class RiemannianManifold:
@@ -76,7 +78,7 @@ class RiemannianManifold:
         g = self.metric_tensor()
         g_inv = g.inv()
         if method == "pow":
-            return sp.simplify(g_inv.pow(1/2))
+            return sp.simplify(g_inv.pow(1 / 2))
         elif method == "svd":
             u, s, v = sp.Matrix(g_inv).singular_value_decomposition()
             sqrt_g_inv = u * sp.sqrt(s) * v
@@ -122,8 +124,8 @@ class RiemannianManifold:
             sp.Expr: The manifold divergence.
         """
         vol_den = self.volume_density()
-        scaled_field = sp.simplify(vol_den*f)
-        manifold_div = matrix_divergence(scaled_field, self.local_coordinates)/vol_den
+        scaled_field = sp.simplify(vol_den * f)
+        manifold_div = matrix_divergence(scaled_field, self.local_coordinates) / vol_den
         return sp.simplify(manifold_div)
 
     def local_bm_drift(self) -> Matrix:
@@ -134,7 +136,7 @@ class RiemannianManifold:
             Matrix: The local Brownian motion drift.
         """
         g_inv = sp.simplify(self.metric_tensor().inv())
-        return sp.simplify(self.manifold_divergence(g_inv)/2)
+        return sp.simplify(self.manifold_divergence(g_inv) / 2)
 
     def local_bm_diffusion(self, method: str = "pow") -> Matrix:
         """
@@ -352,19 +354,122 @@ class RiemannianManifold:
             equations.append(eq)
         return equations
 
-    def sympy_to_numpy(self, expr):
+    def sympy_to_numpy(self, expr) -> Callable:
         return sp.lambdify(self.local_coordinates, expr, modules='numpy')
+
+    def create_local_bm_sde(self) -> SDE:
+        mu = self.sympy_to_numpy(self.local_bm_drift())
+        sigma = self.sympy_to_numpy(self.local_bm_diffusion())
+
+        def drift(t, x):
+            return mu(*x).reshape(len(self.local_coordinates))
+
+        def diffusion(t, x):
+            return sigma(*x)
+
+        sde = SDE(drift, diffusion)
+        return sde
+
+    def lift_paths(self, local_paths):
+        chart_np = self.sympy_to_numpy(self.chart)
+        npaths, ntime, d = local_paths.shape
+        # Assuming hypersurfaces
+        global_paths = np.zeros((npaths, ntime, d + 1))
+        for i in range(npaths):
+            for j in range(ntime):
+                global_paths[i, j, :] = chart_np(*local_paths[i, j, :]).squeeze()
+        return global_paths
+
+    def simulate_rbm(self, x0, tn, ntime, npaths):
+        """
+
+        :param x0: initial point in local coordinates
+        :param tn: time horizon
+        :param ntime: number of time steps
+        :param npaths: number of sample paths
+        :return: tuple of local ensemble paths and global ensemble paths
+        """
+        sde = self.create_local_bm_sde()
+        local_paths = sde.sample_ensemble(x0, tn, ntime, npaths)
+        global_paths = self.lift_paths(local_paths)
+        return local_paths, global_paths
+
+    def plot_rbm(self, local_paths: np.ndarray, global_paths: np.ndarray):
+        """
+        Plot the simulated Brownian motion in both local and extrinsic coordinates.
+
+        Args:
+            local_paths (np.array): Array of local coordinates.
+            global_paths (np.array): Array of extrinsic coordinates.
+        """
+        npaths, ntime, d = local_paths.shape
+        fig = plt.figure(figsize=(20, 7))
+
+        # Plot in local coordinates
+        ax1 = fig.add_subplot(121)
+        for i in range(npaths):
+            ax1.plot(local_paths[i, :, 0], local_paths[i, :, 1], alpha=0.8)
+        ax1.set_title('Brownian Motion in Local Coordinates')
+        ax1.set_xlabel('u')
+        ax1.set_ylabel('v')
+        # Plot manifold surface and Brownian motion in extrinsic coordinates
+        ax2 = fig.add_subplot(122, projection='3d')
+        # Plot the Brownian motion
+        for i in range(npaths):
+            ax2.plot(global_paths[i, :, 0], global_paths[i, :, 1], global_paths[i, :, 2], alpha=0.8)
+        ax2.set_title('Brownian Motion on Manifold Surface')
+        ax2.set_xlabel('X')
+        ax2.set_ylabel('Y')
+        ax2.set_zlabel('Z')
+        plt.tight_layout()
+        plt.show()
+
+    def plot_manifold_surface(self, u_range, v_range, num_points=50):
+        """
+        Plot the surface of the manifold using a grid in local coordinates.
+
+        Args:
+            u_range (tuple): Range for the u coordinate (min, max).
+            v_range (tuple): Range for the v coordinate (min, max).
+            num_points (int): Number of points to use in each dimension of the grid.
+
+        Returns:
+            tuple: Figure and axis objects for further customization if needed.
+        """
+        u = np.linspace(u_range[0], u_range[1], num_points)
+        v = np.linspace(v_range[0], v_range[1], num_points)
+        u, v = np.meshgrid(u, v)
+
+        chart_np = self.sympy_to_numpy(self.chart)
+        X, Y, Z = chart_np(u, v)
+
+        fig = plt.figure(figsize=(12, 8))
+        ax = fig.add_subplot(111, projection='3d')
+
+        surface = ax.plot_surface(X, Y, Z, cmap='viridis', alpha=0.8)
+
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('Z')
+        ax.set_title('Manifold Surface')
+
+        plt.colorbar(surface, ax=ax, label='Z value')
+
+        return fig, ax
 
 
 if __name__ == "__main__":
     u, v = sp.symbols("u v", real=True)
     local_coord = sp.Matrix([u, v])
-    # Sphere
-    chart = sp.Matrix([sp.sin(u) * sp.cos(v), sp.sin(u) * sp.sin(v), sp.cos(u)])
-    # chart = sp.Matrix([u, v, u**2 + v**2])
+    chart = sp.Matrix([u, v, u*v])
     man = RiemannianManifold(local_coord, chart)
+    tn = 3.5
+    npaths = 10
+    ntime = 15000
+    x0 = np.array([1., 1.])
+    local_paths, global_paths = man.simulate_rbm(x0, tn, ntime, npaths)
+    man.plot_rbm(local_paths, global_paths)
 
-    print("Sphere")
     print("\nChart Jacobian:")
     print(man.chart_jacobian())
 
