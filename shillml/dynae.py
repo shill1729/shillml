@@ -546,9 +546,9 @@ class DiffusionLoss(nn.Module):
         tangent_vector = ambient_drift - 0.5 * qv
         normal_proj_vector = torch.bmm(normal_proj, tangent_vector.unsqueeze(2))
         cov_mse = self.cov_mse(model_cov, observed_cov)
-        local_cov_mse = self.cov_mse(bbt, encoded_observed_cov)
+        # local_cov_mse = self.cov_mse(bbt, encoded_observed_cov)
         normal_bundle_loss = self.normal_bundle_loss(normal_proj_vector)
-        total_loss = cov_mse + local_cov_mse + self.normal_bundle_weight * normal_bundle_loss
+        total_loss = cov_mse + self.normal_bundle_weight * normal_bundle_loss
         return total_loss
 
     def extra_repr(self) -> str:
