@@ -56,7 +56,7 @@ class AutoEncoder(nn.Module):
         self.decoder = FeedForwardNeuralNet(decoder_neurons, decoder_acts)
         self.decoder.tie_weights(self.encoder)
 
-    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
+    def forward(self, x: Tensor) -> Tensor:
         """
 
         :param x: the observed point cloud
