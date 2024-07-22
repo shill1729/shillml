@@ -387,7 +387,7 @@ def fit_model(model: nn.Module,
     Returns:
         None
     """
-    optimizer = torch.optim.Adam(params=model.parameters(), lr=lr, weight_decay=weight_decay)
+    optimizer = torch.optim.AdamW(params=model.parameters(), lr=lr, weight_decay=weight_decay)
     for epoch in range(epochs + 1):
         optimizer.zero_grad()
         output = model(input_data)
