@@ -472,9 +472,133 @@ def test_hessian_network():
 
 # Run the tests
 if __name__ == "__main__":
+    import sympy as sp
     test_feed_forward_neural_net()
     test_feed_forward_neural_net_ensemble()
     test_jacobian_shapes()
     test_weight_tying()
     test_jacobian_performance()
     test_hessian_network()
+
+
+    def hessian_function(func, x: torch.Tensor):
+        """
+        Computes the Hessian matrix of a given function with respect to its input.
+
+        Args:
+            func (callable): The function to compute the Hessian for.
+            x (torch.Tensor): The input tensor of shape (n, d),
+                              where n is the batch size and d is the input dimension.
+
+        Returns:
+            torch.Tensor: A tensor representing the Hessian matrix of the function's output
+                          with respect to the input, of shape (n, output_dim, d, d).
+        """
+        n, d = x.shape
+        x.requires_grad_(True)
+        y = func(x)
+        output_dim = y.shape[1] if len(y.shape) > 1 else 1
+
+        hessians = []
+        for i in range(output_dim):
+            # Compute first-order gradients
+            first_grads = torch.autograd.grad(y[:, i].sum() if output_dim > 1 else y.sum(), x, create_graph=True)[0]
+
+            # Compute second-order gradients (Hessian)
+            hessian_rows = []
+            for j in range(d):
+                hessian_row = torch.autograd.grad(first_grads[:, j].sum(), x, retain_graph=True)[0]
+                hessian_rows.append(hessian_row)
+
+            hessian = torch.stack(hessian_rows, dim=1)
+            hessians.append(hessian)
+
+        # Stack Hessians for each output dimension
+        hessians = torch.stack(hessians, dim=1)
+
+        return hessians
+
+
+    # Test functions
+    def test_scalar_to_scalar():
+        # f: R -> R, f(x) = x^2
+        x_sym = sp.Symbol('x')
+        f_sym = sp.cos(x_sym ** 2)
+
+        # Sympy Hessian
+        hessian_sym = sp.hessian(f_sym, (x_sym,))
+
+        # Convert to numpy function
+        f_np = sp.lambdify(x_sym, f_sym, 'numpy')
+        hessian_np = sp.lambdify(x_sym, hessian_sym, 'numpy')
+
+        # PyTorch function
+        def f_torch(x):
+            return torch.cos(x**2)
+
+        # Test
+        x = torch.tensor([[2.0]], requires_grad=True)
+        hessian_torch = hessian_function(f_torch, x)
+
+        hessian_exact = hessian_np(x.item())
+
+        assert np.allclose(hessian_torch.detach().numpy(), hessian_exact, atol=1e-6)
+        print("Scalar to scalar test passed.")
+
+
+    def test_vector_to_scalar():
+        # g: R^2 -> R, g(x, y) = x^2 + xy + y^2
+        x, y = sp.symbols('x y')
+        g_sym = x ** 2 + x * y + y ** 2
+
+        # Sympy Hessian
+        hessian_sym = sp.hessian(g_sym, (x, y))
+
+        # Convert to numpy function
+        g_np = sp.lambdify((x, y), g_sym, 'numpy')
+        hessian_np = sp.lambdify((x, y), hessian_sym, 'numpy')
+
+        # PyTorch function
+        def g_torch(x):
+            return x[:, 0] ** 2 + x[:, 0] * x[:, 1] + x[:, 1] ** 2
+
+        # Test
+        x = torch.tensor([[1.0, 2.0]], requires_grad=True)
+        hessian_torch = hessian_function(g_torch, x)
+
+        hessian_exact = hessian_np(x[0, 0].item(), x[0, 1].item())
+
+        assert np.allclose(hessian_torch.detach().numpy(), hessian_exact, atol=1e-6)
+        print("Vector to scalar test passed.")
+
+
+    def test_vector_to_vector():
+        # h: R^3 -> R^2, h(x, y, z) = (x^2 + y^2, y*z + x)
+        x, y, z = sp.symbols('x y z')
+        h_sym = sp.Matrix([x ** 2 + y ** 2, y * z + x])
+
+        # Sympy Hessian
+        hessian_sym = [sp.hessian(h_sym[i], (x, y, z)) for i in range(2)]
+
+        # Convert to numpy function
+        h_np = sp.lambdify((x, y, z), h_sym, 'numpy')
+        hessian_np = [sp.lambdify((x, y, z), hessian_sym[i], 'numpy') for i in range(2)]
+
+        # PyTorch function
+        def h_torch(x):
+            return torch.stack([x[:, 0] ** 2 + x[:, 1] ** 2, x[:, 1] * x[:, 2] + x[:, 0]], dim=1)
+
+        # Test
+        x = torch.tensor([[1.0, 2.0, 3.0]], requires_grad=True)
+        hessian_torch = hessian_function(h_torch, x)
+
+        hessian_exact = np.stack([hessian_np[i](x[0, 0].item(), x[0, 1].item(), x[0, 2].item()) for i in range(2)])
+
+        assert np.allclose(hessian_torch.detach().numpy(), hessian_exact, atol=1e-6)
+        print("Vector to vector test passed.")
+
+
+    # Run tests
+    test_scalar_to_scalar()
+    test_vector_to_scalar()
+    test_vector_to_vector()
