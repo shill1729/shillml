@@ -339,8 +339,9 @@ class AutoEncoderDiffusion(AutoEncoderDiffusionGeometry):
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         z, dphi, b, q = self.compute_sde_manifold_tensors(x)
         bbt = torch.bmm(b, b.mT)
-        ambient_diffusion = torch.bmm(dphi, b)
-        cov_model = torch.bmm(ambient_diffusion, ambient_diffusion.mT)
+        # ambient_diffusion = torch.bmm(dphi, b)
+        # cov_model = torch.bmm(ambient_diffusion, ambient_diffusion.mT)
+        cov_model = torch.bmm(torch.bmm(dphi, bbt), dphi.mT)
         # Normal Bundle Penalty
         g = torch.bmm(dphi.mT, dphi)
         g_inv = torch.linalg.inv(g)
