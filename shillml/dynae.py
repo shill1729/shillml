@@ -551,7 +551,7 @@ class DiffusionLoss(nn.Module):
         # Add local cov mse
         local_cov_mse = self.local_cov_mse(bbt, encoded_observed_cov)
         normal_bundle_loss = self.normal_bundle_loss(normal_proj_vector)
-        total_loss = local_cov_mse + self.normal_bundle_weight * normal_bundle_loss
+        total_loss = cov_mse + local_cov_mse + self.normal_bundle_weight * normal_bundle_loss
         return total_loss
 
     def extra_repr(self) -> str:
