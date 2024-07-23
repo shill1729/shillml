@@ -530,12 +530,13 @@ class NormalBundleLoss(nn.Module):
 
 
 class DiffusionLoss(nn.Module):
-    def __init__(self, normal_bundle_weight=0.0, norm="fro"):
+    def __init__(self, normal_bundle_weight=0.0, norm="fro", normalize: bool = True):
         super().__init__()
         self.normal_bundle_weight = normal_bundle_weight
         self.cov_mse = CovarianceMSELoss(norm=norm)
         self.local_cov_mse = CovarianceMSELoss(norm=norm)
         self.normal_bundle_loss = NormalBundleLoss()
+        self.normalize = normalize
 
     def forward(self, model_output, targets):
         """
@@ -548,6 +549,11 @@ class DiffusionLoss(nn.Module):
         observed_cov, ambient_drift, encoded_observed_cov = targets
         tangent_vector = ambient_drift - 0.5 * qv
         normal_proj_vector = torch.bmm(normal_proj, tangent_vector.unsqueeze(2))
+        if self.normalize:
+            norms = torch.linalg.vector_norm(normal_proj_vector.squeeze(-1), dim=1, keepdim=True)
+            normal_proj_vector = normal_proj_vector.squeeze(-1)/norms
+            normal_proj_vector = normal_proj_vector.unsqueeze(2)
+
         cov_mse = self.cov_mse(model_cov, observed_cov)
         # Add local cov mse
         local_cov_mse = self.local_cov_mse(bbt, encoded_observed_cov)
