@@ -455,11 +455,11 @@ class CAELoss(nn.Module):
 
 
 class TBAELoss(nn.Module):
-    def __init__(self, tangent_bundle_weight=1., observed_projection=None, *args, **kwargs):
+    def __init__(self, tangent_bundle_weight=1., observed_projection=None, norm="fro", *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.tangent_bundle_weight = tangent_bundle_weight
         self.mse_loss = nn.MSELoss()
-        self.tangent_bundle_reg = TangentBundleLoss()
+        self.tangent_bundle_reg = TangentBundleLoss(norm=norm)
         self.observed_projection = observed_projection
 
     def forward(self, output, x):
@@ -470,12 +470,13 @@ class TBAELoss(nn.Module):
 
 
 class CTBAELoss(nn.Module):
-    def __init__(self, contractive_weight=1., tangent_bundle_weight=1., observed_projection=None, *args, **kwargs):
+    def __init__(self, contractive_weight=1., tangent_bundle_weight=1., observed_projection=None, norm="fro", *args,
+                 **kwargs):
         super().__init__(*args, **kwargs)
         self.contractive_weight = contractive_weight
         self.tangent_bundle_weight = tangent_bundle_weight
         self.mse_loss = nn.MSELoss()
-        self.tangent_bundle_reg = TangentBundleLoss()
+        self.tangent_bundle_reg = TangentBundleLoss(norm=norm)
         self.contractive_reg = ContractiveRegularization()
         self.observed_projection = observed_projection
 
@@ -489,11 +490,11 @@ class CTBAELoss(nn.Module):
 
 
 class CovarianceMSELoss(nn.Module):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, norm="fro", *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.norm = norm
 
-    @staticmethod
-    def forward(model_cov: Tensor, observed_cov: Tensor) -> Tensor:
+    def forward(self, model_cov: Tensor, observed_cov: Tensor) -> Tensor:
         """
         Computes the mean squared error (MSE) between observed and model covariance matrices.
 
@@ -504,7 +505,7 @@ class CovarianceMSELoss(nn.Module):
         Returns:
             Tensor: Mean squared error between observed and model covariance matrices.
         """
-        cov_error = torch.linalg.matrix_norm(model_cov - observed_cov, ord="fro")
+        cov_error = torch.linalg.matrix_norm(model_cov - observed_cov, ord=self.norm)
         mse_cov = torch.mean(cov_error ** 2)
         return mse_cov
 
@@ -529,11 +530,11 @@ class NormalBundleLoss(nn.Module):
 
 
 class DiffusionLoss(nn.Module):
-    def __init__(self, normal_bundle_weight=0.0):
+    def __init__(self, normal_bundle_weight=0.0, norm="fro"):
         super().__init__()
         self.normal_bundle_weight = normal_bundle_weight
-        self.cov_mse = CovarianceMSELoss()
-        self.local_cov_mse = CovarianceMSELoss()
+        self.cov_mse = CovarianceMSELoss(norm=norm)
+        self.local_cov_mse = CovarianceMSELoss(norm=norm)
         self.normal_bundle_loss = NormalBundleLoss()
 
     def forward(self, model_output, targets):
