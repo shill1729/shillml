@@ -473,6 +473,7 @@ def test_hessian_network():
 # Run the tests
 if __name__ == "__main__":
     import sympy as sp
+
     test_feed_forward_neural_net()
     test_feed_forward_neural_net_ensemble()
     test_jacobian_shapes()
@@ -534,7 +535,7 @@ if __name__ == "__main__":
 
         # PyTorch function
         def f_torch(x):
-            return torch.cos(x**2)
+            return torch.cos(x ** 2)
 
         # Test
         x = torch.tensor([[2.0]], requires_grad=True)
