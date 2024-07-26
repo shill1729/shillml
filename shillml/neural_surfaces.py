@@ -2,90 +2,52 @@ from shillml.ffnn import FeedForwardNeuralNet
 import torch.nn as nn
 import torch
 import time
+from torch import Tensor
+from typing import Tuple
+
+
+class FullRankLoss(nn.Module):
+    def __init__(self, weight=1., *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.weight = weight
+
+    def forward(self, df):
+        norms = torch.linalg.matrix_norm(df, ord=-2)
+        return self.weight * torch.sum(torch.exp(-norms ** 2))
+
+
+class HyperSurfaceLoss(nn.Module):
+    def __init__(self, weight=1., *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.full_rank_loss = FullRankLoss(weight)
+
+    def forward(self, model_output: Tuple[Tensor, Tensor], targets=None):
+        f, df = model_output
+        manifold_constraint_loss = torch.mean(torch.linalg.vector_norm(f, ord=2, dim=1) ** 2)
+        full_rank_loss = self.full_rank_loss(df)
+        total_loss = manifold_constraint_loss + full_rank_loss
+        return total_loss
 
 
 class NeuralHyperSurface(nn.Module):
-    """
-
-    """
-
-    def __init__(self, neurons, activations, intrinsic_dim=2, *args, **kwargs):
+    def __init__(self, neurons, activation, intrinsic_dim=2, *args, **kwargs):
         """
 
         :param neurons:
-        :param activations:
+        :param activation:
         :param args:
         :param kwargs:
         """
         super().__init__(*args, **kwargs)
+        activations = [activation] * len(neurons)
         self.f = FeedForwardNeuralNet(neurons, activations)
         self.extrinsic_dim = neurons[0]
         self.codim = neurons[0] - intrinsic_dim
 
-    def manifold_constraint_loss(self, x):
-        """
-
-        :param x:
-        :return:
-        """
-        if len(x.size()) == 2:
-            norm_square = torch.linalg.vector_norm(self.f(x), ord=2, dim=1) ** 2
-            return torch.mean(norm_square)
-        else:
-            raise ValueError("Input 'x' should be a 2d array/tensor.")
-
-    def full_rank_regularization(self, x, reg=0.):
-        """
-
-        :param x:
-        :param reg:
-        :return:
-        """
-        if reg == 0.:
-            return 0.
+    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
+        f = self.f(x)
         df = self.f.jacobian_network(x)
-        norms = torch.linalg.matrix_norm(df, ord=-2)
-        return reg * torch.sum(torch.exp(-norms ** 2))
-
-    def loss(self, x, regs=None):
-        """
-
-
-        :param x:
-        :param regs:
-        :return:
-        """
-        if regs is None:
-            regs = [0]
-        loss1 = self.manifold_constraint_loss(x)
-        loss2 = self.full_rank_regularization(x, regs[0])
-        return loss1 + loss2
-
-    def fit(self, x, lr, epochs, regs=None, print_freq=100) -> None:
-        """
-        Train the autoencoder on a point-cloud.
-
-        :param x: the training data, expected to be of (N, n+1, D)
-        :param lr, the learning rate
-        :param epochs: the number of training epochs
-        :param regs: regularization constant
-        :param print_freq: print frequency of the training loss
-
-        :return: None
-        """
-        start = time.time()
-        optimizer = torch.optim.Adam(params=self.parameters(), lr=lr)
-        for epoch in range(epochs + 1):
-            # Clear gradients w.r.t. parameters
-            optimizer.zero_grad()
-            total_loss = self.loss(x, regs)
-            # Stepping through optimizer
-            total_loss.backward()
-            optimizer.step()
-            if epoch % print_freq == 0:
-                print('Epoch: {}: Train-Loss: {}'.format(epoch, total_loss.item()))
-        end = time.time()
-        print("Training time = " + str(end - start))
+        return f, df
 
     def orthonormalized_jacobian(self, x):
         """
@@ -96,7 +58,6 @@ class NeuralHyperSurface(nn.Module):
         j = self.f.jacobian_network(x)
         A = torch.bmm(j, j.mT)
         A = torch.linalg.inv(A)
-        # B = torch.linalg.cholesky(A)
         U, S, V = torch.linalg.svd(A)
         sqrt_S = torch.sqrt(S.unsqueeze(-1).expand_as(U))
         B = torch.bmm(U, sqrt_S * V.transpose(-2, -1))
@@ -162,3 +123,47 @@ class NeuralHyperSurface(nn.Module):
         mu = self.ito_drift(x).detach().numpy()
         mu = mu.reshape(self.extrinsic_dim)
         return mu
+
+
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from shillml.losses import fit_model
+    from shillml.sdes import SDE
+    seed = None
+    num_pts = 50
+    # TODO just pass hidden dim? or?
+    neurons = [3, 32, 32, 1]
+    fr_weight = 0.5
+    lr = 0.001
+    epochs = 20000
+    weight_decay = 0.01
+    tn = 3.5
+    ntime = 5000
+    npaths = 5
+    activation = nn.Tanh()
+    rng = np.random.default_rng(seed)
+    x = rng.normal(size=(num_pts, 3))
+    x = x / np.linalg.vector_norm(x, axis=1, ord=2, keepdims=True)
+    x = torch.tensor(x, dtype=torch.float32)
+
+    hyp = NeuralHyperSurface(neurons, activation)
+    hyp_loss = HyperSurfaceLoss(fr_weight)
+    fit_model(hyp, hyp_loss, x, None, epochs=epochs, lr=lr, weight_decay=weight_decay)
+    # Test loss:
+
+    x_test = rng.normal(size=(500, 3))
+    x_test = x_test / np.linalg.vector_norm(x_test, axis=1, ord=2, keepdims=True)
+    x_test = torch.tensor(x_test, dtype=torch.float32)
+    print("Test loss = "+str(hyp_loss(hyp(x_test))))
+
+    # Generate sample paths
+    sde = SDE(hyp.drift_coefficient, hyp.diffusion_coefficient)
+    sample_paths = sde.sample_ensemble(x[0, :].detach(), tn, ntime, npaths)
+    # Plot sample paths
+    fig = plt.figure()
+    ax = plt.subplot(111, projection="3d")
+    for i in range(npaths):
+        ax.plot3D(sample_paths[i, :, 0], sample_paths[i, :, 1], sample_paths[i, :, 2], c="black", alpha=0.8)
+    plt.show()
+
