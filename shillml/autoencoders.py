@@ -122,7 +122,7 @@ class AutoEncoder(nn.Module):
         composition = torch.bmm(D_pi, D_phi)
 
         # Create identity matrix of appropriate size
-        I = torch.eye(self.extrinsic_dim, device=x.device).unsqueeze(0).repeat(x.shape[0], 1, 1)
+        I = torch.eye(self.extrinsic_dim).expand(x.size(0), self.extrinsic_dim, self.extrinsic_dim)
 
         # Compute the error: ||D_pi * D_phi - I||_F^2
         error = torch.linalg.matrix_norm(composition - I, ord='fro') ** 2
