@@ -96,6 +96,40 @@ class AutoEncoder(nn.Module):
         g = self.metric_tensor(z)
         return torch.sqrt(torch.linalg.det(g))
 
+    def compute_diffeo_error(self, x: Tensor) -> Tensor:
+        """
+        Compute the diffeomorphism error for a batch of inputs.
+
+        The error is calculated as ||D_pi * D_phi - I||_F^2, where:
+        D_pi is the encoder Jacobian
+        D_phi is the decoder Jacobian
+        I is the identity matrix
+        ||.||_F is the Frobenius norm
+
+        :param x: Input tensor of shape (n, d) where n is the batch size and d is the extrinsic dimension
+        :return: Average diffeomorphism error over the batch
+        """
+        # Compute encoder Jacobian (D_pi)
+        D_pi = self.encoder_jacobian(x)
+
+        # Encode the input to get latent representations
+        z = self.encoder(x)
+
+        # Compute decoder Jacobian (D_phi)
+        D_phi = self.decoder_jacobian(z)
+
+        # Compute D_pi * D_phi
+        composition = torch.bmm(D_pi, D_phi)
+
+        # Create identity matrix of appropriate size
+        I = torch.eye(self.extrinsic_dim, device=x.device).unsqueeze(0).repeat(x.shape[0], 1, 1)
+
+        # Compute the error: ||D_pi * D_phi - I||_F^2
+        error = torch.linalg.matrix_norm(composition - I, ord='fro') ** 2
+
+        # Return the average error over the batch
+        return torch.mean(error)
+
     def plot_surface(self, a, b, grid_size, ax=None, title=None) -> None:
         """
         Plot the surface produced by the neural-network chart.
