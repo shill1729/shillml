@@ -75,9 +75,9 @@ def milstein_nll(x, mu, sigma, sigma_prime, h):
     alpha = torch.clamp(alpha, 0.01)
     beta = sigma * torch.sqrt(torch.tensor(h, dtype=torch.float32))
     gamma = x0 + mu * h - alpha
-    z = x1 - gamma + beta**2/(4*alpha)
+    z = x1 - gamma + beta ** 2 / (4 * alpha)
     q = torch.clamp(z / alpha, min=0.0001)
-    lam = (beta / (2 * alpha))**2
+    lam = (beta / (2 * alpha)) ** 2
     # Check if q is negative
     if torch.any(q <= 0.):
         raise ValueError("q is not strictly positive!")
@@ -86,10 +86,10 @@ def milstein_nll(x, mu, sigma, sigma_prime, h):
         raise ValueError("alpha is not strictly positive!")
         # alpha = torch.clamp(alpha, min=1e-9)
     # Check argument of cosh
-    if torch.any(torch.isnan((torch.sqrt(lam*q)))):
+    if torch.any(torch.isnan((torch.sqrt(lam * q)))):
         print(lam)
         print(q)
-        print(lam*q)
+        print(lam * q)
         raise ValueError("argument to cosh produces nan!")
     likelihood = noncentral_chi_sq_log_pdf(q, lam) - torch.log(alpha)
     nll = -likelihood.sum()
@@ -99,16 +99,16 @@ def milstein_nll(x, mu, sigma, sigma_prime, h):
 def milstein_nll2(x, mu, sigma, sigma_prime, h):
     x0 = x[:, :-1, :]
     x1 = x[:, 1:, :]
-    alpha = 0.5 * sigma * sigma_prime * h # small epsilon for numerical stability
+    alpha = 0.5 * sigma * sigma_prime * h  # small epsilon for numerical stability
     beta = sigma * torch.sqrt(torch.tensor(h, dtype=torch.float32))
     gamma = x0 + mu * h - alpha
-    z = x1 - gamma + beta**2 / (4*alpha)
+    z = x1 - gamma + beta ** 2 / (4 * alpha)
     q = z / alpha
 
     # Compute terms for the log-likelihood
-    term1 = (q + (beta / (2*alpha))**2) / 2
+    term1 = (q + (beta / (2 * alpha)) ** 2) / 2
     term2 = 0.5 * torch.log(torch.abs(z) + 1e-8)  # abs and small epsilon for stability
-    term3 = torch.log(torch.cosh(torch.abs(beta / (2*alpha)) * torch.sqrt(torch.abs(q) + 1e-8)))
+    term3 = torch.log(torch.cosh(torch.abs(beta / (2 * alpha)) * torch.sqrt(torch.abs(q) + 1e-8)))
     term4 = 0.5 * torch.log(torch.abs(alpha) + 1e-8)
 
     # Compute the negative log-likelihood
@@ -116,7 +116,6 @@ def milstein_nll2(x, mu, sigma, sigma_prime, h):
 
     # Add some checks for numerical issues
     if torch.isnan(nll) or torch.isinf(nll):
-
         print(f"NaN or Inf in NLL. min/max values:")
         print(f"alpha: {alpha.min().item():.3e} / {alpha.max().item():.3e}")
         print(f"beta: {beta.min().item():.3e} / {beta.max().item():.3e}")
@@ -128,6 +127,7 @@ def milstein_nll2(x, mu, sigma, sigma_prime, h):
         print(f"term4: {term4.min().item():.3e} / {term4.max().item():.3e}")
         raise ValueError("NaNs!")
     return nll
+
 
 class NeuralSDE(nn.Module):
     def __init__(self, state_dim: int, hidden_dim: List[int], drift_act: Callable, diffusion_act: Callable,
@@ -149,7 +149,8 @@ class NeuralSDE(nn.Module):
         neurons_sigma = [state_dim] + hidden_dim + [state_dim * noise_dim]
         num_activations = len(neurons_mu) - 1
         activations_mu = [drift_act for _ in range(num_activations)] + [None]
-        activations_sigma = [diffusion_act for _ in range(num_activations)] + [nn.Softplus() if state_dim == 1 else None]
+        activations_sigma = [diffusion_act for _ in range(num_activations)] + [
+            nn.Softplus() if state_dim == 1 else None]
         self.drift_net = FeedForwardNeuralNet(neurons_mu, activations_mu)
         self.diffusion_net = FeedForwardNeuralNet(neurons_sigma, activations_sigma)
 
@@ -191,7 +192,7 @@ class NeuralSDE(nn.Module):
 
     def fit(self, ensemble: torch.Tensor, lr: float, epochs: int, printfreq: int = 100, h: float = 1 / 252,
             weight_decay: float = 0., scheme: str = "em"):
-        optimizer = torch.optim.Adam(params=self.parameters(), lr=lr, weight_decay=weight_decay)
+        optimizer = torch.optim.AdamW(params=self.parameters(), lr=lr, weight_decay=weight_decay)
         for epoch in range(epochs + 1):
             optimizer.zero_grad()
             mu, cov, sigma = self.forward(ensemble)
@@ -231,19 +232,19 @@ if __name__ == "__main__":
     noise_dim = 1
     x0 = torch.tensor(x00, dtype=torch.float32)
     x0np = np.array(x00)
-    tn = 0.1
-    ntime = 100
-    ntrain = 100
-    npaths = 5
+    tn = 1.
+    ntime = 1000
+    ntrain = 500
+    npaths = 10
     npaths_fit = 30
     seed = 17
-    lr = 0.00001
-    weight_decay = 0.
-    epochs = 8500
-    hidden_dim = [8]
+    lr = 0.001
+    weight_decay = 0.01
+    epochs = 5000
+    hidden_dim = [16, 16]
     printfreq = 100
-    scheme = "milstein"
-    drift_act = nn.Tanh()
+    scheme = "em"
+    drift_act = nn.CELU()
     diffusion_act = nn.Tanh()
     state_dim = x0.size()[0]
     h = tn / ntime
