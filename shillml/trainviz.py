@@ -71,9 +71,9 @@ class VectorFieldCallback(Callback):
     def plot_vector_field(self, epoch, model):
         fig = plt.figure(figsize=(10, 8))
         ax = fig.add_subplot(111, projection='3d')
-        self.x = self.x.detach()
+
         # Plot the point cloud
-        ax.scatter(self.x[:, 0], self.x[:, 1], self.x[:, 2], c='b', s=20, alpha=0.6)
+        ax.scatter(self.x[:, 0].detach(), self.x[:, 1].detach(), self.x[:, 2].detach(), c='b', s=20, alpha=0.6)
 
         # Compute the vector field
         with torch.no_grad():
@@ -87,10 +87,10 @@ class VectorFieldCallback(Callback):
             normal_proj = torch.eye(model.extrinsic_dim).expand(self.x.size(0), model.extrinsic_dim,
                                                                 model.extrinsic_dim) - self.P
             normal_proj_vector = torch.bmm(normal_proj, tangent_vector.unsqueeze(2)).squeeze(2)
-        normal_proj_vector = normal_proj_vector.detach()
+
         # Plot the vector field
-        ax.quiver(self.x[:, 0], self.x[:, 1], self.x[:, 2],
-                  normal_proj_vector[:, 0], normal_proj_vector[:, 1], normal_proj_vector[:, 2],
+        ax.quiver(self.x[:, 0].detach(), self.x[:, 1].detach(), self.x[:, 2].detach(),
+                  normal_proj_vector[:, 0].detach(), normal_proj_vector[:, 1].detach(), normal_proj_vector[:, 2].detach(),
                   length=0.1, normalize=True, color='r', alpha=0.8)
 
         ax.set_xlabel('X')
