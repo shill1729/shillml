@@ -9,7 +9,7 @@ def fit_model(model: nn.Module,
               input_data: Tensor,
               targets: Any,
               lr: float = 0.001, epochs: int = 1000,
-              print_freq: int = 1000, weight_decay: float = 0.) -> None:
+              print_freq: int = 1000, weight_decay: float = 0., callbacks=None) -> None:
     """
     Trains the given model using the specified loss function and data.
     Assumes the input of the loss function is (output, targets, regs) with regs optional, default to None.
@@ -24,19 +24,28 @@ def fit_model(model: nn.Module,
         epochs (int, optional): Number of epochs to train the model. Defaults to 1000.
         print_freq (int, optional): Frequency of printing the training loss. Defaults to 1000.
         weight_decay (float, optional): Weight decay (L2 penalty) for the optimizer. Defaults to 0.
-
+        callbacks: callbacks
     Returns:
         None
     """
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=lr, weight_decay=weight_decay)
+    callbacks = callbacks or []
+    for cb in callbacks:
+        if hasattr(cb, 'on_train_begin'):
+            cb.on_train_begin(epochs)
     for epoch in range(epochs + 1):
         optimizer.zero_grad()
         output = model(input_data)
         total_loss = loss(output, targets)
         total_loss.backward()
         optimizer.step()
+        metrics = {}  # Collect any metrics you want to pass to callbacks
+        for cb in callbacks:
+            cb.on_epoch_end(epoch, model, metrics)
         if epoch % print_freq == 0:
             print('Epoch: {}: Train-Loss: {}:'.format(epoch, total_loss.item()))
+    for cb in callbacks:
+        cb.on_train_end(model)
     return None
 
 
