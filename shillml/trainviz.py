@@ -2,6 +2,7 @@ from shillml.autoencoders import AutoEncoder
 import matplotlib.pyplot as plt
 from PIL import Image
 import io
+import os
 
 
 class Callback:
@@ -13,13 +14,14 @@ class Callback:
 
 
 class PlotSurfaceCallback(Callback):
-    def __init__(self, num_frames, a, b, grid_size):
+    def __init__(self, num_frames, a, b, grid_size, save_dir):
         self.num_frames = num_frames
         self.a = a
         self.b = b
         self.grid_size = grid_size
         self.frames = []
         self.epoch_interval = None
+        self.save_dir = save_dir
 
     def on_train_begin(self, total_epochs):
         self.epoch_interval = max(1, total_epochs // self.num_frames)
@@ -37,6 +39,6 @@ class PlotSurfaceCallback(Callback):
 
     def on_train_end(self, model):
         if self.frames:
-            self.frames[0].save('training_animation.gif', save_all=True, append_images=self.frames[1:], duration=500,
-                                loop=0)
-
+            gif_path = os.path.join(self.save_dir, 'training_animation.gif')
+            self.frames[0].save(gif_path, save_all=True, append_images=self.frames[1:], duration=500, loop=0)
+            print(f"Animation saved to: {gif_path}")
