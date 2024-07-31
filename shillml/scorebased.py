@@ -65,9 +65,11 @@ class EnhancedScoreModel(nn.Module):
         batch_size, input_dim, _ = Sigma.shape
         div_Sigma = torch.zeros(batch_size, input_dim, device=Sigma.device)
 
+        params = list(self.sigma_net.parameters())
+
         for i in range(input_dim):
-            div_Sigma[:, i] = \
-            torch.autograd.grad(Sigma[:, i, :].sum(), self.sigma_net.parameters()[0], create_graph=True)[0].sum(dim=1)
+            grads = torch.autograd.grad(Sigma[:, i, :].sum(), params, create_graph=True)
+            div_Sigma[:, i] = sum(grad.sum(dim=tuple(range(1, grad.dim()))) for grad in grads)
 
         return div_Sigma
 
