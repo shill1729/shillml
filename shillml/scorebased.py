@@ -69,7 +69,10 @@ class EnhancedScoreModel(nn.Module):
 
         for i in range(input_dim):
             grads = torch.autograd.grad(Sigma[:, i, :].sum(), params, create_graph=True)
-            div_Sigma[:, i] = sum(grad.sum(dim=tuple(range(1, grad.dim()))) for grad in grads)
+            grad_sum = torch.zeros(batch_size, device=Sigma.device)
+            for grad in grads:
+                grad_sum += grad.view(grad.size(0), -1).sum(1)
+            div_Sigma[:, i] = grad_sum
 
         return div_Sigma
 
