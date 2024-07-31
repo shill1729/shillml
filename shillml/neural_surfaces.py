@@ -128,11 +128,13 @@ class NeuralHyperSurface(nn.Module):
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import numpy as np
+    import torch
+    import torch.nn as nn
     from shillml.losses import fit_model
     from shillml.sdes import SDE
+
     seed = None
     num_pts = 50
-    # TODO just pass hidden dim? or?
     neurons = [3, 32, 32, 1]
     fr_weight = 0.5
     lr = 0.001
@@ -142,28 +144,35 @@ if __name__ == "__main__":
     ntime = 5000
     npaths = 5
     activation = nn.Tanh()
+    # Metal has some issues:
+    # NotImplementedError: The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device. If you
+    # want this op to be added in priority during the prototype phase of this feature, please comment
+    # on https://github.com/pytorch/pytorch/issues/77764. As a temporary fix, you can set the
+    # environment variable `PYTORCH_ENABLE_MPS_FALLBACK=1` to use the CPU as a fallback for this op.
+    # WARNING: this will be slower than running natively on MPS.
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    device = torch.device("cpu")
     rng = np.random.default_rng(seed)
     x = rng.normal(size=(num_pts, 3))
-    x = x / np.linalg.vector_norm(x, axis=1, ord=2, keepdims=True)
-    x = torch.tensor(x, dtype=torch.float32)
+    x = x / np.linalg.norm(x, axis=1, ord=2, keepdims=True)
+    x = torch.tensor(x, dtype=torch.float32).to(device)
 
-    hyp = NeuralHyperSurface(neurons, activation)
-    hyp_loss = HyperSurfaceLoss(fr_weight)
+    hyp = NeuralHyperSurface(neurons, activation).to(device)
+    hyp_loss = HyperSurfaceLoss(fr_weight).to(device)
     fit_model(hyp, hyp_loss, x, None, epochs=epochs, lr=lr, weight_decay=weight_decay)
-    # Test loss:
 
     x_test = rng.normal(size=(500, 3))
-    x_test = x_test / np.linalg.vector_norm(x_test, axis=1, ord=2, keepdims=True)
-    x_test = torch.tensor(x_test, dtype=torch.float32)
-    print("Test loss = "+str(hyp_loss(hyp(x_test))))
+    x_test = x_test / np.linalg.norm(x_test, axis=1, ord=2, keepdims=True)
+    x_test = torch.tensor(x_test, dtype=torch.float32).to(device)
+    print("Test loss = " + str(hyp_loss(hyp(x_test)).item()))
 
-    # Generate sample paths
     sde = SDE(hyp.drift_coefficient, hyp.diffusion_coefficient)
-    sample_paths = sde.sample_ensemble(x[0, :].detach(), tn, ntime, npaths)
-    # Plot sample paths
+    sample_paths = sde.sample_ensemble(x[0, :].detach().cpu(), tn, ntime, npaths)
+
     fig = plt.figure()
     ax = plt.subplot(111, projection="3d")
     for i in range(npaths):
         ax.plot3D(sample_paths[i, :, 0], sample_paths[i, :, 1], sample_paths[i, :, 2], c="black", alpha=0.8)
     plt.show()
+
 

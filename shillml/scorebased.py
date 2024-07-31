@@ -1,11 +1,126 @@
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
-import torch.nn.functional as F
-import numpy as np
-import matplotlib.pyplot as plt
+
 from shillml.ffnn import FeedForwardNeuralNet
+
+
+class EnhancedScoreModel(nn.Module):
+    def __init__(self, input_dim, hidden_dims, activation=F.tanh):
+        """
+        Initialize the EnhancedScoreModel with given dimensions and activation function.
+
+        :param input_dim: Dimension of the input features.
+        :param hidden_dims: List of dimensions for hidden layers.
+        :param activation: Activation function to be used in the hidden layers.
+        """
+        super(EnhancedScoreModel, self).__init__()
+        dims = [input_dim] + hidden_dims + [input_dim]
+        activations = [activation] * (len(dims) - 2) + [None]
+
+        # Neural network for mu
+        self.mu_net = FeedForwardNeuralNet(dims, activations)
+
+        # Neural network for sigma (matrix)
+        self.sigma_net = FeedForwardNeuralNet(dims, activations)
+
+    def forward(self, x):
+        """
+        Forward pass through the network.
+
+        :param x: Input tensor.
+        :return: Computed score.
+        """
+        mu = self.mu_net(x)
+        sigma = self.sigma_net(x)
+
+        # Reshape sigma to be a square matrix
+        sigma = sigma.view(x.shape[0], x.shape[1], x.shape[1])
+
+        # Compute Sigma = sigma * sigma^T
+        Sigma = torch.bmm(sigma, sigma.transpose(1, 2))
+
+        # Compute Sigma^-1
+        Sigma_inv = torch.inverse(Sigma)
+
+        # Compute divergence of Sigma
+        div_Sigma = self.compute_divergence(Sigma)
+
+        # Compute the score: Sigma^-1 * (2*mu - div_Sigma)
+        score = torch.bmm(Sigma_inv, (2 * mu - div_Sigma).unsqueeze(-1)).squeeze(-1)
+
+        return score
+
+    def compute_divergence(self, Sigma):
+        """
+        Compute the divergence of Sigma.
+
+        :param Sigma: Input tensor of shape (batch_size, input_dim, input_dim).
+        :return: Divergence of Sigma.
+        """
+        batch_size, input_dim, _ = Sigma.shape
+        div_Sigma = torch.zeros(batch_size, input_dim, device=Sigma.device)
+
+        for i in range(input_dim):
+            div_Sigma[:, i] = \
+            torch.autograd.grad(Sigma[:, i, :].sum(), self.sigma_net.parameters()[0], create_graph=True)[0].sum(dim=1)
+
+        return div_Sigma
+
+    def score_matching_loss(self, x, hutchinson_samples=0):
+        """
+        Compute the score matching loss.
+
+        :param x: Input tensor.
+        :param hutchinson_samples: Number of samples for Hutchinson's trace estimator.
+        :return: Computed loss.
+        """
+        score = self.forward(x)
+
+        # Compute the squared L2 norm of the score
+        score_norm = torch.mean(torch.linalg.vector_norm(score, ord=2, dim=1) ** 2)
+
+        if hutchinson_samples > 0:
+            jacobian_trace = self.hutchinson_trace(x, num_samples=hutchinson_samples)
+        else:
+            jacobian = self.compute_jacobian(x)
+            jacobian_trace = torch.sum(torch.diagonal(jacobian, dim1=1, dim2=2), dim=1)
+        jacobian_trace = torch.mean(jacobian_trace)
+
+        loss = score_norm + 2 * jacobian_trace
+        return loss
+
+    def compute_jacobian(self, x):
+        """
+        Compute the Jacobian of the score function.
+
+        :param x: Input tensor.
+        :return: Jacobian of the score function.
+        """
+        batch_size, input_dim = x.shape
+        jacobian = torch.zeros(batch_size, input_dim, input_dim, device=x.device)
+
+        for i in range(input_dim):
+            jacobian[:, i, :] = torch.autograd.grad(self.forward(x)[:, i].sum(), x, create_graph=True)[0]
+
+        return jacobian
+
+    def hutchinson_trace(self, x, num_samples=1):
+        """
+        Compute the Hutchinson trace estimator.
+
+        :param x: Input tensor.
+        :param num_samples: Number of Hutchinson samples.
+        :return: Hutchinson trace.
+        """
+        batch_size, input_dim = x.shape
+        v = torch.randn(batch_size, num_samples, input_dim, device=x.device)
+        jacobian = self.compute_jacobian(x)
+        quadratic_form = torch.einsum('bsi,boi,bsi->bs', v, jacobian, v)
+        return quadratic_form.mean(dim=1)
 
 
 class ScoreModel(nn.Module):
@@ -81,6 +196,7 @@ def train_score_model(model, data, num_epochs, batch_size, lr, hutchinson_sample
     :param hutchinson_samples: Number of samples for Hutchinson's trace estimator.
     :param weight_decay: Weight decay coefficient.
     """
+    print(torch.cuda.is_available())
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     data = data.to(device)
