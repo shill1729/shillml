@@ -19,13 +19,14 @@ class EnhancedScoreModel(nn.Module):
         """
         super(EnhancedScoreModel, self).__init__()
         dims = [input_dim] + hidden_dims + [input_dim]
+        dims2 = [input_dim] + hidden_dims + [input_dim*input_dim]
         activations = [activation] * (len(dims) - 2) + [None]
 
         # Neural network for mu
         self.mu_net = FeedForwardNeuralNet(dims, activations)
 
         # Neural network for sigma (matrix)
-        self.sigma_net = FeedForwardNeuralNet(dims, activations)
+        self.sigma_net = FeedForwardNeuralNet(dims2, activations)
 
     def forward(self, x):
         """
