@@ -37,7 +37,7 @@ def fit_model(model: nn.Module,
     """
     if batch_size is None:
         batch_size = input_data.size(0)
-    dataset = TensorDataset(input_data, targets)
+    dataset = TensorDataset(*[input_data, *targets])
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=lr, weight_decay=weight_decay)
     callbacks = callbacks or []
