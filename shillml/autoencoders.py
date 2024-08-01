@@ -341,3 +341,36 @@ class CurvatureCTBAutoEncoder(AutoEncoder):
         model_projection = self.neural_orthogonal_projection(z)
         decoder_hessian = self.decoder_hessian(z)
         return x_hat, dpi, model_projection, decoder_hessian
+
+
+class CC2TBAE(AutoEncoder):
+    def __init__(self,
+                 extrinsic_dim: int,
+                 intrinsic_dim: int,
+                 hidden_dims: List[int],
+                 encoder_act: nn.Module,
+                 decoder_act: nn.Module,
+                 *args,
+                 **kwargs):
+        """
+        The forward method returns (x_hat, dpi, P_hat, Hphi) for contractive regularization and tangent space reg,
+        and curvature regularization.
+
+        :param extrinsic_dim:
+        :param intrinsic_dim:
+        :param hidden_dims:
+        :param encoder_act:
+        :param decoder_act:
+        :param args:
+        :param kwargs:
+        """
+        super().__init__(extrinsic_dim, intrinsic_dim, hidden_dims, encoder_act, decoder_act, *args, **kwargs)
+
+    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        z = self.encoder(x)
+        x_hat = self.decoder(z)
+        dpi = self.encoder_jacobian(x)
+        model_projection = self.neural_orthogonal_projection(z)
+        decoder_hessian = self.decoder_hessian(z)
+        encoder_hessian = self.encoder_hessian(x)
+        return x_hat, dpi, model_projection, decoder_hessian, encoder_hessian

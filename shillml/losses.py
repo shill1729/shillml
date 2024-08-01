@@ -213,6 +213,44 @@ class CurvatureCTBAELoss(nn.Module):
         return total_loss
 
 
+class CC2TBAELoss(nn.Module):
+    def __init__(self, contractive_weight=1., second_order_weight=1., tangent_bundle_weight=1., curvature_weight=1., observed_projection=None,
+                 norm="fro", *args,
+                 **kwargs):
+        super().__init__(*args, **kwargs)
+        self.contractive_weight = contractive_weight
+        self.second_order_weight = second_order_weight
+        self.tangent_bundle_weight = tangent_bundle_weight
+        self.curvature_weight = curvature_weight
+        self.mse_loss = nn.MSELoss()
+        self.tangent_bundle_reg = TangentBundleLoss(norm=norm)
+        self.contractive_reg = ContractiveRegularization()
+        self.curvature_reg = NormalBundleLoss()
+        self.second_order_reg = HessianRegularization()
+        self.observed_projection = observed_projection
+        n, D, _ = self.observed_projection.size()
+        self.extrinsic_dim = D
+        self.observed_normal_proj = torch.eye(D).expand(n, D, D) - self.observed_projection
+
+    def forward(self, output, targets):
+        x_hat, dpi, model_projection, decoder_hessian, encoder_hessian = output
+        x, ambient_drift, ambient_cov = targets
+        bbt_proxy = torch.bmm(torch.bmm(dpi, ambient_cov), dpi.mT)
+        qv = torch.stack(
+            [torch.einsum("nii -> n", torch.bmm(bbt_proxy, decoder_hessian[:, i, :, :])) for i in
+             range(self.extrinsic_dim)])
+        qv = qv.T
+        tangent_vector = ambient_drift - 0.5 * qv
+        normal_proj_vector = torch.bmm(self.observed_normal_proj, tangent_vector.unsqueeze(2))
+        mse = self.mse_loss(x_hat, x)
+        contr = self.contractive_reg(dpi) * self.contractive_weight
+        hess = self.second_order_weight * self.second_order_reg(encoder_hessian)
+        tang = self.tangent_bundle_weight * self.tangent_bundle_reg(model_projection, self.observed_projection)
+        curv = self.curvature_weight * self.curvature_reg(normal_proj_vector)
+        total_loss = mse + contr + tang + curv + hess
+        return total_loss
+
+
 class CovarianceMSELoss(nn.Module):
     def __init__(self, norm="fro", *args, **kwargs):
         super().__init__(*args, **kwargs)
