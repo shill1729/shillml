@@ -115,12 +115,14 @@ class ScoreBasedMatchingDiffusionLoss(nn.Module):
         score_norm = torch.mean(torch.linalg.vector_norm(score, ord=2, dim=1) ** 2)
         jacobian_trace = torch.mean(jacobian_trace)
         score_loss = score_norm + 2 * jacobian_trace
-        covariance_loss = self.matrix_mse.forward(model_cov, cov)
+        # Covariance loss
+        covariance_loss = self.covariance_weight * self.matrix_mse.forward(model_cov, cov)
+        # stationary loss
         cov_inv = torch.linalg.inv(cov)
         vec = 2*mu-model_cov_div
         stationary_target = torch.bmm(cov_inv, vec.unsqueeze(2)).squeeze()
         stationary_loss = torch.linalg.vector_norm(score-stationary_target, ord=2, dim=1)
-        stationary_loss = torch.mean(stationary_loss)
+        stationary_loss = self.stationary_weight * torch.mean(stationary_loss)
         total_loss = score_loss + covariance_loss + stationary_loss
         return total_loss
 
