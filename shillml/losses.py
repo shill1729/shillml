@@ -49,7 +49,8 @@ def fit_model(model: nn.Module,
     for epoch in range(epochs + 1):
         model.train()
         total_loss = 0.0
-        for batch_input, batch_target in dataloader:
+        # Or do batch_input in dataloader, and b=batch_input[0], b2=targets[1:]
+        for batch_input, *batch_target in dataloader:
             optimizer.zero_grad()
             output = model(batch_input)
             loss_value = loss(output, batch_target)
