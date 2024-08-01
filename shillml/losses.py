@@ -1,15 +1,21 @@
+from typing import Any, Optional
+
 import torch
 import torch.nn as nn
-from torch import Tensor
-from typing import Any
+from torch import nn, Tensor
+from torch.utils.data import DataLoader, TensorDataset
 
 
 def fit_model(model: nn.Module,
               loss: nn.Module,
               input_data: Tensor,
               targets: Any,
-              lr: float = 0.001, epochs: int = 1000,
-              print_freq: int = 1000, weight_decay: float = 0., callbacks=None) -> None:
+              lr: float = 0.001,
+              epochs: int = 1000,
+              print_freq: int = 1000,
+              weight_decay: float = 0.,
+              batch_size: Optional[int] = None,
+              callbacks=None) -> None:
     """
     Trains the given model using the specified loss function and data.
     Assumes the input of the loss function is (output, targets, regs) with regs optional, default to None.
@@ -24,28 +30,44 @@ def fit_model(model: nn.Module,
         epochs (int, optional): Number of epochs to train the model. Defaults to 1000.
         print_freq (int, optional): Frequency of printing the training loss. Defaults to 1000.
         weight_decay (float, optional): Weight decay (L2 penalty) for the optimizer. Defaults to 0.
+        batch_size (int, optional): Batch size for the DataLoader. Defaults to the first dimension of 'input_data'
         callbacks: callbacks
     Returns:
         None
     """
+    if batch_size is None:
+        batch_size = input_data.size(0)
+    dataset = TensorDataset(input_data, targets)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=lr, weight_decay=weight_decay)
     callbacks = callbacks or []
+
     for cb in callbacks:
         if hasattr(cb, 'on_train_begin'):
             cb.on_train_begin(epochs)
+
     for epoch in range(epochs + 1):
-        optimizer.zero_grad()
-        output = model(input_data)
-        total_loss = loss(output, targets)
-        total_loss.backward()
-        optimizer.step()
+        model.train()
+        total_loss = 0.0
+        for batch_input, batch_target in dataloader:
+            optimizer.zero_grad()
+            output = model(batch_input)
+            loss_value = loss(output, batch_target)
+            loss_value.backward()
+            optimizer.step()
+            total_loss += loss_value.item()
+
         metrics = {}  # Collect any metrics you want to pass to callbacks
         for cb in callbacks:
             cb.on_epoch_end(epoch, model, metrics)
+
         if epoch % print_freq == 0:
-            print('Epoch: {}: Train-Loss: {}:'.format(epoch, total_loss.item()))
+            avg_loss = total_loss / len(dataloader)
+            print('Epoch: {}: Train-Loss: {:.6f}'.format(epoch, avg_loss))
+
     for cb in callbacks:
         cb.on_train_end(model)
+
     return None
 
 

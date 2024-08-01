@@ -1,147 +1,24 @@
 import matplotlib.pyplot as plt
 import torch
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch import Tensor
 from torch.utils.data import DataLoader, TensorDataset
-
+from typing import Tuple
 from shillml.ffnn import FeedForwardNeuralNet
-
-
-class EnhancedScoreModel(nn.Module):
-    def __init__(self, input_dim, hidden_dims, activation=F.tanh):
-        """
-        Initialize the EnhancedScoreModel with given dimensions and activation function.
-
-        :param input_dim: Dimension of the input features.
-        :param hidden_dims: List of dimensions for hidden layers.
-        :param activation: Activation function to be used in the hidden layers.
-        """
-        super(EnhancedScoreModel, self).__init__()
-        dims = [input_dim] + hidden_dims + [input_dim]
-        dims2 = [input_dim] + hidden_dims + [input_dim*input_dim]
-        activations = [activation] * (len(dims) - 2) + [None]
-
-        # Neural network for mu
-        self.mu_net = FeedForwardNeuralNet(dims, activations)
-
-        # Neural network for sigma (matrix)
-        self.sigma_net = FeedForwardNeuralNet(dims2, activations)
-
-    def forward(self, x):
-        """
-        Forward pass through the network.
-
-        :param x: Input tensor.
-        :return: Computed score.
-        """
-        mu = self.mu_net(x)
-        sigma = self.sigma_net(x)
-
-        # Reshape sigma to be a square matrix
-        sigma = sigma.view(x.shape[0], x.shape[1], x.shape[1])
-
-        # Compute Sigma = sigma * sigma^T
-        Sigma = torch.bmm(sigma, sigma.transpose(1, 2))
-
-        # Compute Sigma^-1
-        Sigma_inv = torch.inverse(Sigma)
-
-        # Compute divergence of Sigma
-        div_Sigma = self.compute_divergence(Sigma)
-
-        # Compute the score: Sigma^-1 * (2*mu - div_Sigma)
-        score = torch.bmm(Sigma_inv, (2 * mu - div_Sigma).unsqueeze(-1)).squeeze(-1)
-
-        return score
-
-    def compute_divergence(self, Sigma):
-        """
-        Compute the divergence of Sigma.
-
-        :param Sigma: Input tensor of shape (batch_size, input_dim, input_dim).
-        :return: Divergence of Sigma.
-        """
-        batch_size, input_dim, _ = Sigma.shape
-        div_Sigma = torch.zeros(batch_size, input_dim, device=Sigma.device)
-
-        params = list(self.sigma_net.parameters())
-
-        for i in range(input_dim):
-            grads = torch.autograd.grad(Sigma[:, i, :].sum(), params, create_graph=True)
-            grad_sum = torch.zeros(batch_size, device=Sigma.device)
-            for grad in grads:
-                grad_sum += grad.view(grad.size(0), -1).sum(1)
-            div_Sigma[:, i] = grad_sum
-
-        return div_Sigma
-
-    def score_matching_loss(self, x, hutchinson_samples=0):
-        """
-        Compute the score matching loss.
-
-        :param x: Input tensor.
-        :param hutchinson_samples: Number of samples for Hutchinson's trace estimator.
-        :return: Computed loss.
-        """
-        score = self.forward(x)
-
-        # Compute the squared L2 norm of the score
-        score_norm = torch.mean(torch.linalg.vector_norm(score, ord=2, dim=1) ** 2)
-
-        if hutchinson_samples > 0:
-            jacobian_trace = self.hutchinson_trace(x, num_samples=hutchinson_samples)
-        else:
-            jacobian = self.compute_jacobian(x)
-            jacobian_trace = torch.sum(torch.diagonal(jacobian, dim1=1, dim2=2), dim=1)
-        jacobian_trace = torch.mean(jacobian_trace)
-
-        loss = score_norm + 2 * jacobian_trace
-        return loss
-
-    def compute_jacobian(self, x):
-        """
-        Compute the Jacobian of the score function.
-
-        :param x: Input tensor.
-        :return: Jacobian of the score function.
-        """
-        batch_size, input_dim = x.shape
-        jacobian = torch.zeros(batch_size, input_dim, input_dim, device=x.device)
-
-        for i in range(input_dim):
-            jacobian[:, i, :] = torch.autograd.grad(self.forward(x)[:, i].sum(), x, create_graph=True)[0]
-
-        return jacobian
-
-    def hutchinson_trace(self, x, num_samples=1):
-        """
-        Compute the Hutchinson trace estimator.
-
-        :param x: Input tensor.
-        :param num_samples: Number of Hutchinson samples.
-        :return: Hutchinson trace.
-        """
-        batch_size, input_dim = x.shape
-        v = torch.randn(batch_size, num_samples, input_dim, device=x.device)
-        jacobian = self.compute_jacobian(x)
-        quadratic_form = torch.einsum('bsi,boi,bsi->bs', v, jacobian, v)
-        return quadratic_form.mean(dim=1)
+from shillml.losses import CovarianceMSELoss
 
 
 class ScoreModel(nn.Module):
-    def __init__(self, input_dim, hidden_dims, activation=F.tanh):
-        """
-        Initialize the ScoreModel with given dimensions and activation function.
-
-        :param input_dim: Dimension of the input features.
-        :param hidden_dims: List of dimensions for hidden layers.
-        :param activation: Activation function to be used in the hidden layers.
-        """
-        super(ScoreModel, self).__init__()
-        dims = [input_dim] + hidden_dims + [input_dim]
-        activations = [activation] * (len(dims) - 2) + [None]
-        self.net = FeedForwardNeuralNet(dims, activations)
+    def __init__(self, input_dim, hidden_dims, score_act=F.tanh, hutchinson_samples=0, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.hutchinson_samples = hutchinson_samples
+        # Two neural networks: one for the score
+        score_dims = [input_dim] + hidden_dims + [input_dim]
+        score_activations = [score_act] * (len(score_dims) - 2) + [None]
+        self.score_net = FeedForwardNeuralNet(score_dims, score_activations)
 
     def forward(self, x):
         """
@@ -150,30 +27,15 @@ class ScoreModel(nn.Module):
         :param x: Input tensor.
         :return: Output tensor.
         """
-        return self.net(x)
-
-    def score_matching_loss(self, x, hutchinson_samples=0):
-        """
-        Compute the score matching loss.
-
-        :param x: Input tensor.
-        :param hutchinson_samples: Number of samples for Hutchinson's trace estimator.
-        :return: Computed loss.
-        """
-        score = self.forward(x)
-
+        score = self.score_net.forward(x)
         # Compute the squared L2 norm of the score
-        score_norm = torch.mean(torch.linalg.vector_norm(score, ord=2, dim=1) ** 2)
-
-        if hutchinson_samples > 0:
-            jacobian_trace = self.hutchinson_trace(x, num_samples=hutchinson_samples)
+        # score_norm = torch.mean(torch.linalg.vector_norm(score, ord=2, dim=1) ** 2)
+        if self.hutchinson_samples > 0:
+            jacobian_trace = self.hutchinson_trace(x, num_samples=self.hutchinson_samples)
         else:
-            jacobian = self.net.jacobian_network(x)
+            jacobian = self.score_net.jacobian_network(x)
             jacobian_trace = torch.sum(torch.diagonal(jacobian, dim1=1, dim2=2), dim=1)
-        jacobian_trace = torch.mean(jacobian_trace)
-
-        loss = score_norm + 2 * jacobian_trace
-        return loss
+        return score, jacobian_trace
 
     def hutchinson_trace(self, x, num_samples=1):
         """
@@ -185,9 +47,81 @@ class ScoreModel(nn.Module):
         """
         batch_size, input_dim = x.shape
         v = torch.randn(batch_size, num_samples, input_dim, device=x.device)
-        jacobian = self.net.jacobian_network(x)
+        jacobian = self.score_net.jacobian_network(x)
         quadratic_form = torch.einsum('bsi,boi,bsi->bs', v, jacobian, v)
         return quadratic_form.mean(dim=1)
+
+
+class ScoreBasedDiffusion(ScoreModel):
+    def __init__(self, input_dim, hidden_dims, score_act=F.tanh, cov_act=F.tanh, hutchinson_samples=0, *args, **kwargs):
+        # Neural network for covariance
+        super().__init__(input_dim, hidden_dims, score_act, hutchinson_samples, *args, **kwargs)
+        cov_dims = [input_dim] + hidden_dims + [input_dim ** 2]
+        cov_activations = [cov_act] * (len(cov_dims) - 2) + [None]
+        self.covariance_net = FeedForwardNeuralNet(cov_dims, cov_activations)
+
+    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+        score = self.score_net.forward(x)
+        # Compute the squared L2 norm of the score
+        # score_norm = torch.mean(torch.linalg.vector_norm(score, ord=2, dim=1) ** 2)
+        if self.hutchinson_samples > 0:
+            jacobian_trace = self.hutchinson_trace(x, num_samples=self.hutchinson_samples)
+        else:
+            jacobian = self.score_net.jacobian_network(x)
+            jacobian_trace = torch.sum(torch.diagonal(jacobian, dim1=1, dim2=2), dim=1)
+        d = self.covariance_net.output_dim
+        cov = self.covariance_net.forward(x).view((x.size(0), d, d))
+        cov_div = self.covariance_divergence(x, cov)
+        return score, jacobian_trace, cov, cov_div
+
+    @staticmethod
+    def covariance_divergence(x: Tensor, cov: Tensor) -> Tensor:
+        batch_size, d, _ = cov.size()
+        cov_div = torch.zeros(batch_size, d, device=x.device)
+        for i in range(d):
+            for j in range(d):
+                grad_cov = torch.autograd.grad(outputs=cov[:, i, j], inputs=x,
+                                               grad_outputs=torch.ones_like(cov[:, i, j]),
+                                               retain_graph=True, create_graph=True)[0]
+                cov_div[:, i] += grad_cov[:, j]
+        return cov_div
+
+
+class ScoreBasedMatchingLoss(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def forward(model_output: Tensor, targets=None):
+        score, jacobian_trace = model_output
+        # Compute the squared L2 norm of the score
+        score_norm = torch.mean(torch.linalg.vector_norm(score, ord=2, dim=1) ** 2)
+        jacobian_trace = torch.mean(jacobian_trace)
+        loss = score_norm + 2 * jacobian_trace
+        return loss
+
+
+class ScoreBasedMatchingDiffusionLoss(nn.Module):
+    def __init__(self, covariance_weight=1., stationary_weight=1., *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.covariance_weight = covariance_weight
+        self.stationary_weight = stationary_weight
+        self.matrix_mse = CovarianceMSELoss()
+
+    def forward(self, model_output: Tensor, targets: Tensor):
+        score, jacobian_trace, model_cov, model_cov_div = model_output
+        mu, cov = targets
+        # Compute the squared L2 norm of the score
+        score_norm = torch.mean(torch.linalg.vector_norm(score, ord=2, dim=1) ** 2)
+        jacobian_trace = torch.mean(jacobian_trace)
+        score_loss = score_norm + 2 * jacobian_trace
+        covariance_loss = self.matrix_mse.forward(model_cov, cov)
+        cov_inv = torch.linalg.inv(cov)
+        stationary_target = torch.bmm(cov_inv, 2*mu.unsqueeze(2)-model_cov_div).squeeze()
+        stationary_loss = torch.linalg.vector_norm(score-stationary_target, ord=2, dim=1)
+        stationary_loss = torch.mean(stationary_loss)
+        total_loss = score_loss + covariance_loss + stationary_loss
+        return total_loss
 
 
 def train_score_model(model, data, num_epochs, batch_size, lr, hutchinson_samples=0, weight_decay=1e-3):
@@ -224,76 +158,60 @@ def train_score_model(model, data, num_epochs, batch_size, lr, hutchinson_sample
         print(f"Epoch {epoch + 1}/{num_epochs}, Average Loss: {avg_loss:.4f}")
 
 
-def sample_langevin_dynamics(model, num_samples, num_steps, step_size, initial_noise_std):
+def mala_sampling(model: ScoreModel, num_samples, step_size, num_steps, burn_in=500, thinning=10, initial_samples=None):
     """
-    Generate samples using Langevin dynamics.
+    Generate samples using the Metropolis-Adjusted Langevin Algorithm (MALA).
 
-    :param model: Trained ScoreModel.
-    :param num_samples: Number of samples to generate.
-    :param num_steps: Number of Langevin steps.
-    :param step_size: Step size for Langevin dynamics.
-    :param initial_noise_std: Standard deviation of the initial noise.
+    :param model: Trained score model.
+    :param num_samples: Number of samples to generate after burn-in and thinning.
+    :param step_size: Step size for the Langevin Dynamics.
+    :param num_steps: Number of MALA steps.
+    :param burn_in: Number of burn-in steps.
+    :param thinning: Thinning interval to reduce autocorrelation.
+    :param initial_samples: Initial samples to start the dynamics.
     :return: Generated samples.
     """
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-    with torch.no_grad():
-        x = torch.randn(num_samples, model.net.input_dim, device=device) * initial_noise_std
-        for _ in range(num_steps):
-            score = model(x)
-            noise = torch.randn_like(x)
-            x = x + 0.5 * step_size * score + torch.sqrt(torch.tensor(step_size, device=device)) * noise
-        return x
+    if initial_samples is None:
+        initial_samples = torch.randn((100, model.score_net.output_dim))
 
-
-def sample_mcmc_langevin(model, num_samples, num_steps, step_size, initial_noise_std, temperature=1.0, thinning=100):
-    """
-    Generate samples using MCMC Langevin dynamics.
-
-    :param model: Trained ScoreModel.
-    :param num_samples: Number of samples to generate.
-    :param num_steps: Number of Langevin steps.
-    :param step_size: Step size for Langevin dynamics.
-    :param initial_noise_std: Standard deviation of the initial noise.
-    :param temperature: Temperature parameter for MCMC.
-    :param thinning: Thinning interval for sampling.
-    :return: Generated samples.
-    """
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-    x = torch.randn(num_samples, model.net.input_dim, device=device) * initial_noise_std
-
-    accepted_samples = torch.zeros((num_samples * (num_steps // thinning), model.net.input_dim), device=device)
-    acceptance_count = 0
-    sample_index = 0
+    samples = initial_samples
+    accepted_samples = []
 
     for step in range(num_steps):
-        with torch.no_grad():
-            score = model(x)
+        current_samples = samples.clone()
+        # current_score = model(current_samples)
+        current_score = model.score_net.forward(current_samples)
+        # Propose new samples
+        noise = torch.randn_like(current_samples)
+        proposed_samples = current_samples + step_size * current_score + np.sqrt(2 * step_size) * noise
+        proposed_score = model.score_net.forward(proposed_samples)
 
-            noise = torch.randn_like(x)
-            x_proposed = x + 0.5 * step_size * score + torch.sqrt(
-                torch.tensor(step_size * temperature, device=device)) * noise
-            score_proposed = model(x_proposed)
+        # Compute acceptance probability
+        current_log_prob = -0.5 * torch.sum(current_samples ** 2, dim=1)
+        proposed_log_prob = -0.5 * torch.sum(proposed_samples ** 2, dim=1)
 
-            current_log_prob = -0.5 * torch.sum(x ** 2, dim=1) + torch.sum(score * x, dim=1)
-            proposed_log_prob = -0.5 * torch.sum(x_proposed ** 2, dim=1) + torch.sum(score_proposed * x_proposed, dim=1)
+        current_to_proposed_log_prob = current_log_prob + torch.sum(
+            (proposed_samples - current_samples - step_size * current_score) ** 2, dim=1) / (4 * step_size)
+        proposed_to_current_log_prob = proposed_log_prob + torch.sum(
+            (current_samples - proposed_samples - step_size * proposed_score) ** 2, dim=1) / (4 * step_size)
 
-            log_accept_prob = (proposed_log_prob - current_log_prob) / temperature
-            accept_prob = torch.exp(torch.clamp(log_accept_prob, max=0))
+        acceptance_prob = torch.exp(proposed_to_current_log_prob - current_to_proposed_log_prob)
+        acceptance_prob = torch.min(acceptance_prob, torch.ones_like(acceptance_prob))
 
-            u = torch.rand(num_samples, device=device)
-            mask = u < accept_prob
-            x = torch.where(mask.unsqueeze(1), x_proposed, x)
+        # Accept or reject
+        uniform_samples = torch.rand_like(acceptance_prob)
+        accepted = (uniform_samples < acceptance_prob).float()
+        samples = accepted[:, None] * proposed_samples + (1 - accepted[:, None]) * current_samples
 
-            acceptance_count += mask.sum().item()
+        # Collect samples after burn-in period and according to thinning interval
+        if step >= burn_in and (step - burn_in) % thinning == 0:
+            accepted_samples.append(samples)
 
-            if (step + 1) % thinning == 0:
-                accepted_samples[sample_index:sample_index + num_samples] = x
-                sample_index += num_samples
-    acceptance_rate = acceptance_count / (num_steps * num_samples)
-    print(f"Average acceptance rate: {acceptance_rate:.4f}")
-    return accepted_samples
+        # Break if we have enough samples
+        if len(accepted_samples) >= num_samples:
+            break
+
+    return torch.cat(accepted_samples)
 
 
 def generate_toy_data(num_samples):
@@ -310,16 +228,23 @@ def generate_toy_data(num_samples):
 
 
 if __name__ == "__main__":
-    input_dim = 2
-    hidden_dims = [32]
+    from shillml.losses import fit_model
+    input_dim = 2  # Example input dimension
+    hidden_dims = [64, 64]  # Example hidden dimensions
     model = ScoreModel(input_dim, hidden_dims)
 
     data = generate_toy_data(8000)
-
-    train_score_model(model, data, num_epochs=500, batch_size=128, lr=1e-3, hutchinson_samples=0)
-
-    samples = sample_mcmc_langevin(model, num_samples=1000, num_steps=5000, step_size=1e-5, initial_noise_std=0.1,
-                                   temperature=0.5)
+    score_loss = ScoreBasedMatchingLoss()
+    fit_model(model, score_loss, data, data, epochs=100, batch_size=128)
+    # Initialize with random samples
+    samples = mala_sampling(
+        model,
+        num_samples=1000,
+        step_size=0.01,
+        num_steps=10000,
+        burn_in=500,
+        thinning=10
+    )
 
     plt.figure(figsize=(10, 5))
 
