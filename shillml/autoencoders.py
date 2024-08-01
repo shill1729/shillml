@@ -71,28 +71,31 @@ class AutoEncoder(nn.Module):
                                     for path in latent_ensemble])
         return lifted_ensemble
 
-    def encoder_jacobian(self, x) -> Tensor:
+    def encoder_jacobian(self, x: Tensor) -> Tensor:
         return self.encoder.jacobian_network(x)
 
-    def decoder_jacobian(self, z) -> Tensor:
+    def decoder_jacobian(self, z: Tensor) -> Tensor:
         return self.decoder.jacobian_network(z)
 
-    def decoder_hessian(self, z) -> Tensor:
+    def decoder_hessian(self, z: Tensor) -> Tensor:
         return self.decoder.hessian_network(z)
 
-    def neural_orthogonal_projection(self, z) -> Tensor:
+    def encoder_hessian(self, x: Tensor) -> Tensor:
+        return self.encoder.hessian_network(x)
+
+    def neural_orthogonal_projection(self, z: Tensor) -> Tensor:
         dphi = self.decoder_jacobian(z)
         g = torch.bmm(dphi.mT, dphi)
         g_inv = torch.linalg.inv(g)
         P = torch.bmm(torch.bmm(dphi, g_inv), dphi.mT)
         return P
 
-    def neural_metric_tensor(self, z) -> Tensor:
+    def neural_metric_tensor(self, z: Tensor) -> Tensor:
         dphi = self.decoder_jacobian(z)
         g = torch.bmm(dphi.mT, dphi)
         return g
 
-    def neural_volume_measure(self, z) -> Tensor:
+    def neural_volume_measure(self, z: Tensor) -> Tensor:
         g = self.metric_tensor(z)
         return torch.sqrt(torch.linalg.det(g))
 
@@ -130,7 +133,7 @@ class AutoEncoder(nn.Module):
         # Return the average error over the batch
         return torch.mean(error)
 
-    def plot_surface(self, a, b, grid_size, ax=None, title=None) -> None:
+    def plot_surface(self, a: float, b: float, grid_size: int, ax=None, title=None) -> None:
         """
         Plot the surface produced by the neural-network chart.
 
@@ -191,6 +194,35 @@ class ContractiveAutoEncoder(AutoEncoder):
         x_hat = self.decoder(z)
         dpi = self.encoder_jacobian(x)
         return x_hat, dpi
+
+
+class SecondOrderContractiveAutoEncoder(AutoEncoder):
+    def __init__(self,
+                 extrinsic_dim: int,
+                 intrinsic_dim: int,
+                 hidden_dims: List[int],
+                 encoder_act: nn.Module,
+                 decoder_act: nn.Module,
+                 *args,
+                 **kwargs):
+        """
+        The forward method returns (x_hat, dpi, pi_hessian) for second order contractive regularization
+        :param extrinsic_dim:
+        :param intrinsic_dim:
+        :param hidden_dims:
+        :param encoder_act:
+        :param decoder_act:
+        :param args:
+        :param kwargs:
+        """
+        super().__init__(extrinsic_dim, intrinsic_dim, hidden_dims, encoder_act, decoder_act, *args, **kwargs)
+
+    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, Tensor]:
+        z = self.encoder(x)
+        x_hat = self.decoder(z)
+        dpi = self.encoder_jacobian(x)
+        encoder_hessian = self.encoder.hessian_network(x)
+        return x_hat, dpi, encoder_hessian
 
 
 class TangentBundleAutoEncoder(AutoEncoder):

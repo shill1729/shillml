@@ -69,6 +69,27 @@ class ContractiveRegularization(nn.Module):
         return contraction_penalty
 
 
+class HessianRegularization(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    @staticmethod
+    def forward(hessian: torch.Tensor) -> torch.Tensor:
+        """
+        Computes the encoder Hessian regularization penalty for a batch of points.
+
+        Args:
+            hessian (Tensor): Hessian tensor of shape (n, d, D, D).
+
+        Returns:
+            Tensor: Hessian regularization penalty.
+        """
+        # Compute the Frobenius norm of the Hessian for each point and output dimension
+        hessian_frobenius_norm = torch.linalg.matrix_norm(hessian, ord='fro', dim=(2, 3))
+        penalty = torch.sum(hessian_frobenius_norm ** 2, dim=1)  # Sum over the output dimensions
+        return torch.mean(penalty)  # Average over the batch
+
+
 class TangentBundleLoss(nn.Module):
     def __init__(self, norm="fro", *args, **kwargs):
         self.norm = norm
@@ -100,6 +121,24 @@ class CAELoss(nn.Module):
     def forward(self, output, x):
         x_hat, dpi = output
         total_loss = self.mse_loss(x_hat, x) + self.contractive_weight * self.contractive_reg(dpi)
+        return total_loss
+
+
+class CAEHLoss(nn.Module):
+    def __init__(self, first_order_weight=1., second_order_weight=1., *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.contractive_weight = first_order_weight
+        self.hessian_weight = second_order_weight
+        self.mse_loss = nn.MSELoss()
+        self.contractive_reg = ContractiveRegularization()
+        self.hessian_reg = HessianRegularization()
+
+    def forward(self, output, x):
+        x_hat, dpi, hessian_pi = output
+        reconstruction_loss = self.mse_loss(x_hat, x)
+        contractive_loss = self.contractive_weight * self.contractive_reg(dpi)
+        hessian_loss = self.hessian_weight * self.hessian_reg(hessian_pi)
+        total_loss = reconstruction_loss+contractive_loss+hessian_loss
         return total_loss
 
 

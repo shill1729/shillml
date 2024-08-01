@@ -530,7 +530,7 @@ if __name__ == "__main__":
         hessian_sym = sp.hessian(f_sym, (x_sym,))
 
         # Convert to numpy function
-        f_np = sp.lambdify(x_sym, f_sym, 'numpy')
+        # f_np = sp.lambdify(x_sym, f_sym, 'numpy')
         hessian_np = sp.lambdify(x_sym, hessian_sym, 'numpy')
 
         # PyTorch function
