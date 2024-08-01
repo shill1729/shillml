@@ -69,7 +69,7 @@ class ScoreBasedDiffusion(ScoreModel):
         else:
             jacobian = self.score_net.jacobian_network(x)
             jacobian_trace = torch.sum(torch.diagonal(jacobian, dim1=1, dim2=2), dim=1)
-        d = self.covariance_net.output_dim
+        d = self.score_net.output_dim
         cov = self.covariance_net.forward(x).view((x.size(0), d, d))
         cov_div = self.covariance_divergence(x, cov)
         return score, jacobian_trace, cov, cov_div
