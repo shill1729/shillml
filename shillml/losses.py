@@ -116,9 +116,10 @@ def fit_model(model: nn.Module,
     """
     if batch_size is None:
         batch_size = input_data.size(0)
-
+    no_targets = False
     # Convert targets to a tuple if it's not already a tuple or list
     if isinstance(targets, Tensor):
+        no_targets = True
         targets = (targets,)
     elif isinstance(targets, list):
         targets = tuple(targets)
@@ -144,7 +145,10 @@ def fit_model(model: nn.Module,
             output = model(batch_input)
 
             # Always pass batch_targets as a tuple to the loss function
-            loss_value = loss(output, batch_targets)
+            if no_targets:
+                loss_value = loss(output, *batch_targets)
+            else:
+                loss_value = loss(output, batch_targets)
 
             loss_value.backward()
             optimizer.step()
