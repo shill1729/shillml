@@ -217,6 +217,57 @@ def mala_sampling(model: ScoreModel, num_samples, step_size, num_steps, burn_in=
     return torch.cat(accepted_samples)
 
 
+def adaptive_mala_sampling(model: ScoreModel, num_samples, initial_step_size, num_steps, burn_in=500, thinning=10,
+                           target_acceptance_rate=0.001, initial_samples=None):
+    if initial_samples is None:
+        initial_samples = torch.randn((100, model.score_net.output_dim))
+
+    samples = initial_samples
+    accepted_samples = []
+    step_size = initial_step_size
+    acceptance_rates = []
+
+    for step in range(num_steps):
+        current_samples = samples.clone()
+        current_score = model.score_net.forward(current_samples)
+        noise = torch.randn_like(current_samples)
+        proposed_samples = current_samples + step_size * current_score + np.sqrt(2 * step_size) * noise
+        proposed_score = model.score_net.forward(proposed_samples)
+
+        current_log_prob = -0.5 * torch.sum(current_samples ** 2, dim=1)
+        proposed_log_prob = -0.5 * torch.sum(proposed_samples ** 2, dim=1)
+
+        current_to_proposed_log_prob = current_log_prob + torch.sum(
+            (proposed_samples - current_samples - step_size * current_score) ** 2, dim=1) / (4 * step_size)
+        proposed_to_current_log_prob = proposed_log_prob + torch.sum(
+            (current_samples - proposed_samples - step_size * proposed_score) ** 2, dim=1) / (4 * step_size)
+
+        acceptance_prob = torch.exp(proposed_to_current_log_prob - current_to_proposed_log_prob)
+        acceptance_prob = torch.min(acceptance_prob, torch.ones_like(acceptance_prob))
+
+        uniform_samples = torch.rand_like(acceptance_prob)
+        accepted = (uniform_samples < acceptance_prob).float()
+        samples = accepted[:, None] * proposed_samples + (1 - accepted[:, None]) * current_samples
+
+        acceptance_rate = torch.mean(accepted).item()
+        acceptance_rates.append(acceptance_rate)
+
+        if step % 100 == 0:
+            mean_acceptance_rate = np.mean(acceptance_rates[-100:])
+            if mean_acceptance_rate < target_acceptance_rate:
+                step_size *= 0.9
+            elif mean_acceptance_rate > target_acceptance_rate:
+                step_size *= 1.1
+
+        if step >= burn_in and (step - burn_in) % thinning == 0:
+            accepted_samples.append(samples)
+
+        if len(accepted_samples) >= num_samples:
+            break
+
+    return torch.cat(accepted_samples)
+
+
 def generate_toy_data(num_samples):
     """
     Generate toy data for training.
@@ -238,7 +289,7 @@ if __name__ == "__main__":
 
     data = generate_toy_data(8000)
     score_loss = ScoreBasedMatchingLoss()
-    fit_model(model, score_loss, data, data, epochs=100, batch_size=128)
+    fit_model(model, score_loss, data, [data], epochs=100, batch_size=128)
     # Initialize with random samples
     samples = mala_sampling(
         model,
@@ -247,6 +298,47 @@ if __name__ == "__main__":
         num_steps=10000,
         burn_in=500,
         thinning=10
+    )
+
+    plt.figure(figsize=(10, 5))
+
+    plt.subplot(1, 2, 1)
+    plt.scatter(data[:, 0], data[:, 1], alpha=0.5, s=1)
+    plt.title("Original Data")
+
+    plt.subplot(1, 2, 2)
+    plt.scatter(samples[:, 0].detach(), samples[:, 1].detach(), alpha=0.5, s=1)
+    plt.title("Generated Samples")
+
+    plt.tight_layout()
+    plt.show()
+
+    # Initialize with random samples
+    samples = adaptive_mala_sampling(
+        model,
+        initial_step_size=0.01,
+        num_samples=1000,
+        num_steps=10000,
+        burn_in=500,
+        thinning=10
+    )
+
+    plt.figure(figsize=(10, 5))
+
+    plt.subplot(1, 2, 1)
+    plt.scatter(data[:, 0], data[:, 1], alpha=0.5, s=1)
+    plt.title("Original Data")
+
+    plt.subplot(1, 2, 2)
+    plt.scatter(samples[:, 0].detach(), samples[:, 1].detach(), alpha=0.5, s=1)
+    plt.title("Generated Samples")
+
+    plt.tight_layout()
+    plt.show()
+
+    samples = hmc_sampling(
+        model,
+        num_samples=1000
     )
 
     plt.figure(figsize=(10, 5))

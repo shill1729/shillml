@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from shillml.sdes import SDE
 from shillml.sampler import ImportanceSampler
 from shillml.diffgeo import RiemannianManifold
+from matplotlib.patches import Ellipse
 
 
 class PointCloud:
@@ -166,6 +167,174 @@ class PointCloud:
         plt.tight_layout()
         plt.show()
 
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from matplotlib.patches import Ellipse
+
+    def plot_eigenvectors(self, points=None, matrices=None, scale=1.0, figsize=(10, 8)):
+        """
+        Plot eigenvectors of the matrix field at each point.
+
+        :param points: The points to plot (if None, generates new points)
+        :param matrices: The matrices at each point
+        :param scale: Scaling factor for eigenvectors
+        :param figsize: Figure size
+        """
+        if points is None or matrices is None:
+            points, _, _, _, param_samples = self.generate(n=1000)
+            matrices = [self.np_local_diffusion(*sample) for sample in param_samples]
+
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(111, projection='3d')
+
+        for point, matrix in zip(points, matrices):
+            eigenvalues, eigenvectors = np.linalg.eig(matrix)
+            for i in range(len(eigenvalues)):
+                ax.quiver(point[0], point[1], point[2],
+                          eigenvectors[0, i], eigenvectors[1, i], eigenvectors[2, i],
+                          length=scale * eigenvalues[i], color='r')
+
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('Z')
+        ax.set_title('Eigenvectors of Matrix Field')
+        plt.show()
+
+    def plot_heatmap(self, points=None, matrices=None, figsize=(10, 8)):
+        """
+        Plot heatmap of the matrix field entries at each point.
+
+        :param points: The points to plot (if None, generates new points)
+        :param matrices: The matrices at each point
+        :param figsize: Figure size
+        """
+        if points is None or matrices is None:
+            points, _, _, _, param_samples = self.generate(n=1000)
+            matrices = [self.np_local_diffusion(*sample) for sample in param_samples]
+
+        fig, axs = plt.subplots(self.dimension, self.dimension, figsize=figsize, subplot_kw={'projection': '3d'})
+
+        for i in range(self.dimension):
+            for j in range(self.dimension):
+                values = np.array([matrix[i, j] for matrix in matrices])
+                scatter = axs[i, j].scatter(points[:, 0], points[:, 1], points[:, 2], c=values, cmap='viridis')
+                fig.colorbar(scatter, ax=axs[i, j])
+                axs[i, j].set_title(f'Matrix Entry ({i}, {j})')
+
+        plt.tight_layout()
+        plt.show()
+
+    def plot_tensor_glyphs(self, points=None, matrices=None, scale=1.0, figsize=(10, 8)):
+        """
+        Plot tensor glyphs to visualize the matrix field at each point.
+
+        :param points: The points to plot (if None, generates new points)
+        :param matrices: The matrices at each point
+        :param scale: Scaling factor for tensor glyphs
+        :param figsize: Figure size
+        """
+        if points is None or matrices is None:
+            points, _, _, _, param_samples = self.generate(n=1000)
+            matrices = [self.np_local_diffusion(*sample) for sample in param_samples]
+
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(111, projection='3d')
+
+        for point, matrix in zip(points, matrices):
+            eigenvalues, eigenvectors = np.linalg.eig(matrix)
+            for i in range(len(eigenvalues)):
+                glyph = Ellipse((point[0], point[1]), width=eigenvalues[i] * scale,
+                                height=eigenvalues[(i + 1) % len(eigenvalues)] * scale,
+                                angle=np.rad2deg(np.arctan2(eigenvectors[1, i], eigenvectors[0, i])))
+                ax.add_patch(glyph)
+
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('Z')
+        ax.set_title('Tensor Glyphs of Matrix Field')
+        plt.show()
+
+    def plot_sample_paths(self, tn=1, ntime=1000, npaths=50, figsize=(16, 8)):
+        """
+        Plot sample paths of the process in both 3D ambient space and 2D local coordinates.
+
+        :param tn: Final time
+        :param ntime: Number of time steps
+        :param npaths: Number of paths
+        :param figsize: Figure size
+        """
+        points, weights, extrinsic_drifts, extrinsic_covariances, param_samples = self.generate(n=1000)
+
+        # Generate latent paths
+        paths1 = self.latent_sde.sample_ensemble(param_samples[0, :], tn=tn, ntime=ntime, npaths=npaths, noise_dim=self.dimension)
+        paths = np.zeros((npaths, ntime + 1, self.target_dim))
+        for j in range(npaths):
+            for i in range(ntime + 1):
+                paths[j, i, :] = np.squeeze(self.np_phi(*paths1[j, i, :]))
+
+        fig = plt.figure(figsize=figsize)
+
+        # Plot 3D ambient paths
+        ax1 = fig.add_subplot(121, projection='3d')
+        for j in range(npaths):
+            ax1.plot3D(paths[j, :, 0], paths[j, :, 1], paths[j, :, 2], alpha=0.8)
+
+        ax1.set_xlabel('X')
+        ax1.set_ylabel('Y')
+        ax1.set_zlabel('Z')
+        ax1.set_title('Sample Paths in 3D Ambient Space')
+
+        # Plot 2D local coordinate paths
+        ax2 = fig.add_subplot(122)
+        for j in range(npaths):
+            ax2.plot(paths1[j, :, 0], paths1[j, :, 1], alpha=0.8)
+
+        ax2.set_xlabel('u')
+        ax2.set_ylabel('v')
+        ax2.set_title('Sample Paths in 2D Local Coordinates')
+
+        plt.tight_layout()
+        plt.show()
+
+    def plot_drift_vector_field(self, points=None, weights=None, drifts=None, drift_scale=1.0, alpha=0.5,
+                                figsize=(10, 8)):
+        """
+        Plot the drift vector field.
+
+        :param points: The points to plot (if None, generates new points)
+        :param weights: The weights of the points (for sizing)
+        :param drifts: The extrinsic drifts at each point
+        :param drift_scale: Scaling factor for drift vectors
+        :param alpha: Transparency of points
+        :param figsize: Figure size
+        """
+        if points is None or weights is None or drifts is None:
+            points, weights, drifts, _, _ = self.generate(n=1000)
+
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(111, projection='3d')
+
+        # Scale weights for point sizes
+        sizes = 50 * weights / np.max(weights)
+
+        # Plot points
+        scatter = ax.scatter(points[:, 0], points[:, 1], points[:, 2],
+                             s=sizes, alpha=alpha, c=weights)
+
+        # Plot drift vectors
+        ax.quiver(points[:, 0], points[:, 1], points[:, 2],
+                  drifts[:, 0], drifts[:, 1], drifts[:, 2],
+                  length=drift_scale, normalize=True, color='r')
+
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('Z')
+        ax.set_title('Drift Vector Field')
+
+        plt.colorbar(scatter, label='Weight')
+        plt.tight_layout()
+        plt.show()
+
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
@@ -219,7 +388,6 @@ if __name__ == "__main__":
                    local_drift=local_drift, local_diffusion=local_diffusion)
     ]
     surface_names = ["Sphere", "Torus", "Paraboloid", "Hyperboloid"]
-
     # Create plots
     for cloud, name in zip(clouds, surface_names):
         fig, axs = plt.subplots(1, 2, figsize=(12, 8), subplot_kw={'projection': '3d'})
@@ -256,3 +424,4 @@ if __name__ == "__main__":
 
         plt.tight_layout()
         plt.show()
+
