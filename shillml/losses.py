@@ -6,10 +6,83 @@ from torch import nn, Tensor
 from torch.utils.data import DataLoader, TensorDataset
 
 
+# def fit_model(model: nn.Module,
+#               loss: nn.Module,
+#               input_data: Tensor,
+#               targets: Any,
+#               lr: float = 0.001,
+#               epochs: int = 1000,
+#               print_freq: int = 1000,
+#               weight_decay: float = 0.,
+#               batch_size: Optional[int] = None,
+#               callbacks=None) -> None:
+#     """
+#     Trains the given model using the specified loss function and data.
+#     Assumes the input of the loss function is (output, targets, regs) with regs optional, default to None.
+#     'output' is the output of the model.
+#
+#     Args:
+#         model (nn.Module): The neural network model to be trained.
+#         loss (Any): The loss function used for training.
+#         input_data (Tensor): input data to the network model
+#         targets (Tensor): labels/targets data for the network output
+#         lr (float, optional): Learning rate for the optimizer. Defaults to 0.001.
+#         epochs (int, optional): Number of epochs to train the model. Defaults to 1000.
+#         print_freq (int, optional): Frequency of printing the training loss. Defaults to 1000.
+#         weight_decay (float, optional): Weight decay (L2 penalty) for the optimizer. Defaults to 0.
+#         batch_size (int, optional): Batch size for the DataLoader. Defaults to the first dimension of 'input_data'
+#         callbacks: callbacks
+#     Returns:
+#         None
+#     """
+#     if batch_size is None:
+#         batch_size = input_data.size(0)
+#     dataset = TensorDataset(*[input_data, *targets])
+#     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+#     optimizer = torch.optim.AdamW(params=model.parameters(), lr=lr, weight_decay=weight_decay)
+#     callbacks = callbacks or []
+#
+#     for cb in callbacks:
+#         if hasattr(cb, 'on_train_begin'):
+#             cb.on_train_begin(epochs)
+#
+#     for epoch in range(epochs + 1):
+#         model.train()
+#         total_loss = 0.0
+#         # Or do batch_input in dataloader, and b=batch_input[0], b2=targets[1:]
+#         for b in dataloader:
+#             batch_input = b[0]
+#             batch_target = b[1:]
+#             optimizer.zero_grad()
+#             output = model(batch_input)
+#             loss_value = loss(output, batch_target)
+#             loss_value.backward()
+#             optimizer.step()
+#             total_loss += loss_value.item()
+#
+#         metrics = {}  # Collect any metrics you want to pass to callbacks
+#         for cb in callbacks:
+#             cb.on_epoch_end(epoch, model, metrics)
+#
+#         if epoch % print_freq == 0:
+#             avg_loss = total_loss / len(dataloader)
+#             print('Epoch: {}: Train-Loss: {:.6f}'.format(epoch, avg_loss))
+#
+#     for cb in callbacks:
+#         cb.on_train_end(model)
+#
+#     return None
+import torch
+import torch.nn as nn
+from torch import Tensor
+from torch.utils.data import TensorDataset, DataLoader
+from typing import Any, Optional, Union, List, Tuple
+
+
 def fit_model(model: nn.Module,
               loss: nn.Module,
               input_data: Tensor,
-              targets: Any,
+              targets: Union[Tensor, List[Tensor], Tuple[Tensor, ...]],
               lr: float = 0.001,
               epochs: int = 1000,
               print_freq: int = 1000,
@@ -25,7 +98,7 @@ def fit_model(model: nn.Module,
         model (nn.Module): The neural network model to be trained.
         loss (Any): The loss function used for training.
         input_data (Tensor): input data to the network model
-        targets (Tensor): labels/targets data for the network output
+        targets (Union[Tensor, List[Tensor], Tuple[Tensor, ...]]): labels/targets data for the network output
         lr (float, optional): Learning rate for the optimizer. Defaults to 0.001.
         epochs (int, optional): Number of epochs to train the model. Defaults to 1000.
         print_freq (int, optional): Frequency of printing the training loss. Defaults to 1000.
@@ -37,7 +110,16 @@ def fit_model(model: nn.Module,
     """
     if batch_size is None:
         batch_size = input_data.size(0)
-    dataset = TensorDataset(*[input_data, *targets])
+
+    # Convert targets to a list of tensors if it's not already
+    if isinstance(targets, Tensor):
+        targets = [targets]
+    elif isinstance(targets, (list, tuple)):
+        targets = list(targets)
+    else:
+        raise ValueError("targets must be a Tensor, List of Tensors, or Tuple of Tensors")
+
+    dataset = TensorDataset(input_data, *targets)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=lr, weight_decay=weight_decay)
     callbacks = callbacks or []
@@ -49,13 +131,18 @@ def fit_model(model: nn.Module,
     for epoch in range(epochs + 1):
         model.train()
         total_loss = 0.0
-        # Or do batch_input in dataloader, and b=batch_input[0], b2=targets[1:]
-        for b in dataloader:
-            batch_input = b[0]
-            batch_target = b[1:]
+        for batch in dataloader:
+            batch_input = batch[0]
+            batch_targets = batch[1:]
             optimizer.zero_grad()
             output = model(batch_input)
-            loss_value = loss(output, batch_target)
+
+            # Adjust loss function call based on number of targets
+            if len(batch_targets) == 1:
+                loss_value = loss(output, batch_targets[0])
+            else:
+                loss_value = loss(output, *batch_targets)
+
             loss_value.backward()
             optimizer.step()
             total_loss += loss_value.item()

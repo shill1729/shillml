@@ -289,7 +289,7 @@ if __name__ == "__main__":
 
     data = generate_toy_data(8000)
     score_loss = ScoreBasedMatchingLoss()
-    fit_model(model, score_loss, data, [data], epochs=100, batch_size=128)
+    fit_model(model, score_loss, data, data, epochs=100, batch_size=128)
     # Initialize with random samples
     samples = mala_sampling(
         model,
