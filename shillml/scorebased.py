@@ -289,7 +289,8 @@ if __name__ == "__main__":
 
     data = generate_toy_data(8000)
     score_loss = ScoreBasedMatchingLoss()
-    fit_model(model, score_loss, data, data, epochs=100, batch_size=128)
+    # Need batching
+    fit_model(model, score_loss, data, data, epochs=100)
     # Initialize with random samples
     samples = mala_sampling(
         model,
@@ -299,7 +300,7 @@ if __name__ == "__main__":
         burn_in=500,
         thinning=10
     )
-
+    data = data.detach()
     plt.figure(figsize=(10, 5))
 
     plt.subplot(1, 2, 1)
