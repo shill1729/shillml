@@ -1,20 +1,12 @@
 from typing import List, Callable, Optional, Any
-
-import torch.nn.functional as F
+from torch import Tensor
+import torch.nn.functional as func
 import matplotlib.pyplot as plt
 import torch.nn as nn
 import numpy as np
 
 import time
 import torch
-
-
-# define function to set device
-def get_device(user_choice: str = "cpu"):
-    if user_choice == "gpu" and torch.cuda.is_available():
-        return torch.device("cuda")
-    else:
-        return torch.device("cpu")
 
 
 class FeedForwardNeuralNet(nn.Module):
@@ -24,8 +16,9 @@ class FeedForwardNeuralNet(nn.Module):
 
     Attributes:
         layers (nn.ModuleList): A list of linear layers in the network.
-        activation (callable): The activation function applied to all but the final layer.
-        final_activation (callable, optional): The activation function applied to the final layer.
+        activations (callable): The activation function applied to all but the final layer.
+        input_dim (int): the input dimension
+        output_dim (int): the output dimension
 
     Methods:
         forward(x):
@@ -34,8 +27,20 @@ class FeedForwardNeuralNet(nn.Module):
         jacobian_network(x):
             Computes the Jacobian matrix of the network's output with respect to its input.
 
+        hessian_network(x):
+            Computes the Hessian matrix of the network's output with respect to its input, for each coordinate
+
+        jacobian_network_for_paths(x):
+            Computes the Jacobian matrix of the network's output with respect to its input. Here the input
+            is assumed to be a batch of sample-paths.
+
+        hessian_network_for_paths(x):
+            Computes the Hessian matrix of the network's output with respect to its input, for each coordinate.
+            Here the input is assumed to be a batch of sample-paths.
+
         tie_weights(x):
-            Tie the weights of this network to another network via tranpose (but not the biases).
+            Tie the weights of this network to another network via transpose (but not the biases).
+
     """
 
     def __init__(self, neurons: List[int], activations: List[Optional[Callable[..., Any]]]):
@@ -44,7 +49,7 @@ class FeedForwardNeuralNet(nn.Module):
 
         Args:
             neurons (list): A list of integers where each integer represents the number of nodes in a layer.
-            activation (callable): The activation function to apply after each linear layer
+            activations (callable): The list of activation functions to apply after each linear layer
         """
         super(FeedForwardNeuralNet, self).__init__()
         self.layers = nn.ModuleList()
@@ -55,15 +60,15 @@ class FeedForwardNeuralNet(nn.Module):
         for i in range(len(neurons) - 1):
             self.layers.append(nn.Linear(neurons[i], neurons[i + 1]))
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         """
         Defines the forward pass of the neural network.
 
         Args:
-            x (torch.Tensor): The input tensor to the network.
+            x (Tensor): The input tensor to the network.
 
         Returns:
-            torch.Tensor: The output tensor after passing through the network and activation functions.
+            Tensor: The output tensor after passing through the network and activation functions.
         """
         for i, layer in enumerate(self.layers):
             x = layer(x)
@@ -71,7 +76,7 @@ class FeedForwardNeuralNet(nn.Module):
                 x = self.activations[i](x)
         return x
 
-    def jacobian_network(self, x: torch.Tensor, method: str = "autograd"):
+    def jacobian_network(self, x: Tensor, method: str = "autograd"):
         """
 
         :param x:
@@ -83,15 +88,15 @@ class FeedForwardNeuralNet(nn.Module):
         elif method == "exact":
             return self._jacobian_network_explicit(x)
 
-    def _jacobian_network_autograd(self, x: torch.Tensor):
+    def _jacobian_network_autograd(self, x: Tensor) -> Tensor:
         """
         Computes the Jacobian matrix of the network's output with respect to its input.
 
         Args:
-            x (torch.Tensor): The input tensor to the network. The tensor should have `requires_grad` enabled.
+            x (Tensor): The input tensor to the network. The tensor should have `requires_grad` enabled.
 
         Returns:
-            torch.Tensor: A tensor representing the Jacobian matrix of the network's output with respect to the input.
+            Tensor: A tensor representing the Jacobian matrix of the network's output with respect to the input.
         """
         x = x.requires_grad_(True)
         y = self.forward(x)
@@ -105,15 +110,15 @@ class FeedForwardNeuralNet(nn.Module):
         jacobian = torch.stack(jacobian, dim=1)
         return jacobian
 
-    def _jacobian_network_explicit(self, x: torch.Tensor):
+    def _jacobian_network_explicit(self, x: Tensor):
         """
         Computes the Jacobian matrix of the network's output with respect to its input explicitly.
 
         Args:
-            x (torch.Tensor): The input tensor to the network of shape (batch_size, input_dim).
+            x (Tensor): The input tensor to the network of shape (batch_size, input_dim).
 
         Returns:
-            torch.Tensor: A tensor representing the Jacobian matrix of the network's output
+            Tensor: A tensor representing the Jacobian matrix of the network's output
                           with respect to the input, of shape (batch_size, output_dim, input_dim).
         """
         # Ensure input is batched
@@ -126,7 +131,7 @@ class FeedForwardNeuralNet(nn.Module):
         weights = [layer.weight for layer in self.layers]
 
         # Initialize Jacobian with the first layer's weight
-        J = weights[0].repeat(batch_size, 1, 1)
+        jacobian = weights[0].repeat(batch_size, 1, 1)
 
         # Forward pass to store intermediate values
         y = x
@@ -153,7 +158,7 @@ class FeedForwardNeuralNet(nn.Module):
                 diag_term = torch.eye(z.size(1)).unsqueeze(0).repeat(batch_size, 1, 1)
 
             next_term = torch.bmm(weights[i].repeat(batch_size, 1, 1), diag_term)
-            J = torch.bmm(next_term, J)
+            jacobian = torch.bmm(next_term, jacobian)
 
         # Apply final activation if present
         if self.activations[-1] is not None:
@@ -161,20 +166,20 @@ class FeedForwardNeuralNet(nn.Module):
             a = self.activations[-1](z)
             diag = torch.autograd.grad(a.sum(), z, create_graph=False)[0]
             diag_term = torch.diag_embed(diag.view(batch_size, -1))
-            J = torch.bmm(diag_term, J)
+            jacobian = torch.bmm(diag_term, jacobian)
 
-        return J
+        return jacobian
 
-    def hessian_network(self, x: torch.Tensor):
+    def hessian_network(self, x: Tensor):
         """
         Computes the Hessian matrix of the network's output with respect to its input.
 
         Args:
-            x (torch.Tensor): The input tensor to the network of shape (n, d),
+            x (Tensor): The input tensor to the network of shape (n, d),
                               where n is the batch size and d is the input dimension.
 
         Returns:
-            torch.Tensor: A tensor representing the Hessian matrix of the network's output
+            Tensor: A tensor representing the Hessian matrix of the network's output
                           with respect to the input, of shape (n, self.output_dim, d, d).
         """
         n, d = x.shape
@@ -200,20 +205,21 @@ class FeedForwardNeuralNet(nn.Module):
 
         return hessians
 
-    def jacobian_network_for_paths(self, x: torch.Tensor):
+    def jacobian_network_for_paths(self, x: Tensor):
         """
         Computes the Jacobian matrix of the network's output with respect to its input.
 
         Args:
-            x (torch.Tensor): The input tensor to the network of shape (N, n+1, d). The tensor should have `requires_grad` enabled.
+            x (Tensor): The input tensor to the network of shape (num_paths, n+1, d). The tensor should have
+            `requires_grad` enabled.
 
         Returns:
-            torch.Tensor: A tensor representing the Jacobian matrix of the network's output with respect to the input.
+            Tensor: A tensor representing the Jacobian matrix of the network's output with respect to the input.
         """
-        N, n, d = x.size()
+        num_paths, n, d = x.size()
         x.requires_grad_(True)
-        jacobian = torch.zeros(N, n, d, self.output_dim)
-        for i in range(N):
+        jacobian = torch.zeros(num_paths, n, d, self.output_dim)
+        for i in range(num_paths):
             for j in range(n):
                 x_ij = x[i, j, :].unsqueeze(0)  # shape (1, d)
                 output = self.forward(x_ij)  # shape (1, D)
@@ -225,23 +231,24 @@ class FeedForwardNeuralNet(nn.Module):
                     jacobian[i, j, :, k] = gradients.squeeze()
         return jacobian.transpose(2, 3)
 
-    def hessian_network_for_paths(self, x: torch.Tensor):
+    def hessian_network_for_paths(self, x: Tensor):
         """
         Computes the Hessian matrix of the network's output with respect to its input.
 
         Args:
-            x (torch.Tensor): The input tensor to the network of shape (N, n+1, d). The tensor should have `requires_grad` enabled.
+            x (Tensor): The input tensor to the network of shape (num_paths, n+1, d). The tensor should have
+            `requires_grad` enabled.
 
         Returns:
-            torch.Tensor: A tensor representing the Hessian matrix of the network's output with respect to the input.
+            Tensor: A tensor representing the Hessian matrix of the network's output with respect to the input.
         """
-        N, n, d = x.shape
+        num_paths, n, d = x.shape
         x.requires_grad_(True)
         outputs = self.forward(x)
 
-        hessians = torch.zeros(N, n, self.output_dim, d, d)
+        hessians = torch.zeros(num_paths, n, self.output_dim, d, d)
 
-        for i in range(N):
+        for i in range(num_paths):
             for j in range(n):
                 for k in range(self.output_dim):
                     grad_outputs = torch.zeros_like(outputs)
@@ -251,10 +258,10 @@ class FeedForwardNeuralNet(nn.Module):
                                             allow_unused=True)[0]
                     if grads is None:
                         continue
-                    for l in range(d):
-                        hessian_row = torch.autograd.grad(grads[i, j, l], x, retain_graph=True, allow_unused=True)[0]
+                    for r in range(d):
+                        hessian_row = torch.autograd.grad(grads[i, j, r], x, retain_graph=True, allow_unused=True)[0]
                         if hessian_row is not None:
-                            hessians[i, j, k, l, :] = hessian_row[i, j, :]
+                            hessians[i, j, k, r, :] = hessian_row[i, j, :]
 
         return hessians
 
@@ -271,44 +278,44 @@ class FeedForwardNeuralNet(nn.Module):
 # Testing the class
 def test_feed_forward_neural_net():
     # Simple test case: y = Ax + b
-    A = torch.tensor([[2.0, 3.0], [4.0, 5.0]])
+    a = torch.tensor([[2.0, 3.0], [4.0, 5.0]])
     b = torch.tensor([1.0, 2.0])
     net1 = FeedForwardNeuralNet([2, 2], [None])
-    net1.layers[0].weight = nn.Parameter(A)
+    net1.layers[0].weight = nn.Parameter(a)
     net1.layers[0].bias = nn.Parameter(b)
 
     x = torch.tensor([[1.0, 1.0]], requires_grad=True)
     output1 = net1(x)
-    expected_output1 = torch.matmul(A, x.t()).t() + b
+    expected_output1 = torch.matmul(a, x.t()).t() + b
     assert torch.allclose(output1, expected_output1), "Simple linear test failed"
 
     jacobian1 = net1.jacobian_network(x)
-    expected_jacobian1 = A.unsqueeze(0).expand(x.size(0), -1, -1)
+    expected_jacobian1 = a.unsqueeze(0).expand(x.size(0), -1, -1)
     print(jacobian1)
     print(expected_jacobian1)
     assert torch.allclose(jacobian1, expected_jacobian1), "Jacobian test for linear network failed"
 
     # Test case: y = A2 * ReLU(A1 * x + b1) + b2
-    A1 = torch.tensor([[1.0, -1.0], [2.0, 0.5]])
+    a1 = torch.tensor([[1.0, -1.0], [2.0, 0.5]])
     b1 = torch.tensor([-1.0, 1.0])
-    A2 = torch.tensor([[1.0, 0.5], [-0.5, 2.0]])
+    a2 = torch.tensor([[1.0, 0.5], [-0.5, 2.0]])
     b2 = torch.tensor([0.5, -1.0])
 
-    net2 = FeedForwardNeuralNet([2, 2, 2], [F.relu, None])
-    net2.layers[0].weight = nn.Parameter(A1)
+    net2 = FeedForwardNeuralNet([2, 2, 2], [func.relu, None])
+    net2.layers[0].weight = nn.Parameter(a1)
     net2.layers[0].bias = nn.Parameter(b1)
-    net2.layers[1].weight = nn.Parameter(A2)
+    net2.layers[1].weight = nn.Parameter(a2)
     net2.layers[1].bias = nn.Parameter(b2)
 
     x = torch.tensor([[1.0, 1.0]], requires_grad=True)
     output2 = net2(x)
-    expected_output2 = torch.matmul(A2, F.relu(torch.matmul(A1, x.t()).t() + b1).t()).t() + b2
+    expected_output2 = torch.matmul(a2, func.relu(torch.matmul(a1, x.t()).t() + b1).t()).t() + b2
     assert torch.allclose(output2, expected_output2), "Two-layer test with ReLU failed"
 
     jacobian2 = net2.jacobian_network(x)
     with torch.no_grad():
-        relu_grad = (torch.matmul(A1, x.t()).t() + b1 > 0).float()
-        expected_jacobian2 = A2 @ (relu_grad.unsqueeze(2) * A1.unsqueeze(0))
+        relu_grad = (torch.matmul(a1, x.t()).t() + b1 > 0).float()
+        expected_jacobian2 = a2 @ (relu_grad.unsqueeze(2) * a1.unsqueeze(0))
     assert torch.allclose(jacobian2, expected_jacobian2), "Jacobian test for two-layer network failed"
 
     print("The implementation passed tests for Ax+b and A2ReLU(A1 x + b1)+b1 on output values and jacobians")
@@ -316,7 +323,7 @@ def test_feed_forward_neural_net():
 
 def test_jacobian_shapes():
     # Test for single input
-    net = FeedForwardNeuralNet([3, 4, 2], [F.tanh, None])
+    net = FeedForwardNeuralNet([3, 4, 2], [func.tanh, None])
     x_single = torch.randn(1, 3, requires_grad=True)
     jacobian_single_auto = net.jacobian_network(x_single, method="autograd")
     jacobian_single_explicit = net.jacobian_network(x_single, method="exact")
@@ -348,8 +355,8 @@ def test_weight_tying():
     neurons2 = neurons1[::-1]
 
     # Initialize two networks with given structures
-    net1 = FeedForwardNeuralNet(neurons1, [F.relu, F.relu, F.relu, F.tanh, None])
-    net2 = FeedForwardNeuralNet(neurons2, [F.relu, F.relu, F.relu, F.tanh, None])
+    net1 = FeedForwardNeuralNet(neurons1, [func.relu, func.relu, func.relu, func.tanh, None])
+    net2 = FeedForwardNeuralNet(neurons2, [func.relu, func.relu, func.relu, func.tanh, None])
 
     # Initialize the weights of net1
     for layer in net1.layers:
@@ -372,22 +379,22 @@ def test_weight_tying():
 
 
 def test_feed_forward_neural_net_ensemble():
-    A = torch.tensor([[2.0, 3.0], [4.0, 5.0], [1, 2.]])
+    a = torch.tensor([[2.0, 3.0], [4.0, 5.0], [1, 2.]])
     b = torch.tensor([1.0, 2.0, 1.])
     net1 = FeedForwardNeuralNet([2, 3], [None])
-    net1.layers[0].weight = nn.Parameter(A)
+    net1.layers[0].weight = nn.Parameter(a)
     net1.layers[0].bias = nn.Parameter(b)
 
-    N, n, d = 5, 10, 2
-    x = torch.randn(N, n, d, requires_grad=True)
-    output1 = net1(x.view(-1, d)).view(N, n, -1)
-    expected_output1 = torch.matmul(x.view(-1, d), A.t()).view(N, n, -1) + b
+    num_paths, n, d = 5, 10, 2
+    x = torch.randn(num_paths, n, d, requires_grad=True)
+    output1 = net1(x.view(-1, d)).view(num_paths, n, -1)
+    expected_output1 = torch.matmul(x.view(-1, d), a.t()).view(num_paths, n, -1) + b
 
     assert torch.allclose(output1, expected_output1), "Ensemble linear test failed"
 
     jacobian1 = net1.jacobian_network_for_paths(x)
 
-    expected_jacobian1 = A.unsqueeze(0).unsqueeze(0).expand(N, n, -1, -1)
+    expected_jacobian1 = a.unsqueeze(0).unsqueeze(0).expand(num_paths, n, -1, -1)
     print(jacobian1[0, 0, :])
     print(expected_jacobian1[0, 0, :])
     assert torch.allclose(jacobian1, expected_jacobian1), "Jacobian test for ensemble linear network failed"
@@ -398,7 +405,7 @@ def test_feed_forward_neural_net_ensemble():
 
 def test_jacobian_performance():
     # Set up the network
-    net = FeedForwardNeuralNet([10, 20, 15, 5], [F.relu, F.tanh, None])
+    net = FeedForwardNeuralNet([10, 20, 15, 5], [func.relu, func.tanh, None])
 
     # Define batch sizes to test
     batch_sizes = [1, 10, 50, 100, 500, 1000, 5000, 10000, 30000]
@@ -453,7 +460,7 @@ def test_jacobian_performance():
 
 def test_hessian_network():
     # Create a simple network
-    net = FeedForwardNeuralNet([2, 3, 2], [F.relu, F.tanh, None])
+    net = FeedForwardNeuralNet([2, 3, 2], [func.relu, func.tanh, None])
 
     # Create a batch of inputs
     x = torch.randn(5, 2, requires_grad=True)
@@ -482,22 +489,22 @@ if __name__ == "__main__":
     test_hessian_network()
 
 
-    def hessian_function(func, x: torch.Tensor):
+    def hessian_function(f, x: Tensor):
         """
         Computes the Hessian matrix of a given function with respect to its input.
 
         Args:
-            func (callable): The function to compute the Hessian for.
-            x (torch.Tensor): The input tensor of shape (n, d),
+            f (callable): The function to compute the Hessian for.
+            x (Tensor): The input tensor of shape (n, d),
                               where n is the batch size and d is the input dimension.
 
         Returns:
-            torch.Tensor: A tensor representing the Hessian matrix of the function's output
+            Tensor: A tensor representing the Hessian matrix of the function's output
                           with respect to the input, of shape (n, output_dim, d, d).
         """
         n, d = x.shape
         x.requires_grad_(True)
-        y = func(x)
+        y = f(x)
         output_dim = y.shape[1] if len(y.shape) > 1 else 1
 
         hessians = []
@@ -518,7 +525,6 @@ if __name__ == "__main__":
         hessians = torch.stack(hessians, dim=1)
 
         return hessians
-
 
     # Test functions
     def test_scalar_to_scalar():

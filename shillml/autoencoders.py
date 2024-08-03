@@ -9,18 +9,6 @@ import torch
 from shillml.ffnn import FeedForwardNeuralNet
 
 
-def toggle_model(model: nn.Module, on: bool = False) -> None:
-    """
-    Turn a nn.Module's gradient tracking on or off for its parameters
-    :param model: nn.Module, the model to turn on or off
-    :param on: bool, True for on, False for off
-    :return: None
-    """
-    for param in model.parameters():
-        param.requires_grad = on
-    return None
-
-
 class AutoEncoder(nn.Module):
     def __init__(self,
                  extrinsic_dim: int,
