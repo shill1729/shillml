@@ -1,7 +1,5 @@
-from shillml.ffnn import FeedForwardNeuralNet
+from shillml.models.ffnn import FeedForwardNeuralNet
 import torch.nn as nn
-import torch
-import time
 from torch import Tensor
 from typing import Tuple
 
@@ -130,7 +128,7 @@ if __name__ == "__main__":
     import numpy as np
     import torch
     import torch.nn as nn
-    from shillml.losses import fit_model
+    from shillml.losses.losses import fit_model
     from shillml.sdes import SDE
 
     seed = None

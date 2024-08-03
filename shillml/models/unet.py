@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class GroupNorm(nn.Module):
     def __init__(self, num_groups, num_channels):
         super(GroupNorm, self).__init__()
@@ -83,7 +84,8 @@ class AttnBlock(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self, ch, out_ch, ch_mult=(1, 2, 4, 8), num_res_blocks=2, attn_resolutions=(16,), dropout=0.0, resamp_with_conv=True):
+    def __init__(self, ch, out_ch, ch_mult=(1, 2, 4, 8), num_res_blocks=2, attn_resolutions=(16,), dropout=0.0,
+                 resamp_with_conv=True):
         super(Model, self).__init__()
         self.num_resolutions = len(ch_mult)
         self.down = nn.ModuleList()

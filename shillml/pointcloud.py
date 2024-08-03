@@ -1,10 +1,9 @@
 import sympy as sp
 import numpy as np
 from typing import Callable, Tuple, List
-import matplotlib.pyplot as plt
 from shillml.sdes import SDE
-from shillml.sampler import ImportanceSampler
-from shillml.diffgeo import RiemannianManifold
+from shillml.utils.sampler import ImportanceSampler
+
 
 class PointCloud:
     def __init__(self, phi: Callable, params: List[sp.Symbol], bounds: List[Tuple],

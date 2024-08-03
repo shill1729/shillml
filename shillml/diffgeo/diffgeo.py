@@ -4,7 +4,7 @@ import sympy as sp
 import matplotlib.pyplot as plt
 
 from sympy import Matrix, MutableDenseNDimArray
-from shillml.symcalc import matrix_divergence
+from shillml.utils.sde_cas import matrix_divergence
 from shillml.sdes import SDE
 
 

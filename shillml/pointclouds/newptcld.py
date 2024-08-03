@@ -1,9 +1,7 @@
 import sympy as sp
-import numpy as np
-from typing import Callable, Tuple, List
-import matplotlib.pyplot as plt
+from typing import Tuple, List
 from shillml.sdes import SDE
-from shillml.sampler import ImportanceSampler
+from shillml.utils.sampler import ImportanceSampler
 from shillml.diffgeo import RiemannianManifold
 from matplotlib.patches import Ellipse
 
@@ -166,10 +164,6 @@ class PointCloud:
         plt.colorbar(scatter, label='Largest Singular Value')
         plt.tight_layout()
         plt.show()
-
-    import matplotlib.pyplot as plt
-    import numpy as np
-    from matplotlib.patches import Ellipse
 
     def plot_eigenvectors(self, points=None, matrices=None, scale=1.0, figsize=(10, 8)):
         """
@@ -340,7 +334,7 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import numpy as np
     import sympy as sp
-    from shillml.diffgeo import RiemannianManifold
+    from shillml.diffgeo.diffgeo import RiemannianManifold
 
     tn = 1
     ntime = 1000

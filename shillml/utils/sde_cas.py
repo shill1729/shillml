@@ -1,7 +1,37 @@
 # This module has sympy functions for dealing with SDEs (on manifolds).
 import sympy as sp
 import numpy as np
-from shillml.symcalc import matrix_divergence, hessian
+
+
+def matrix_divergence(a: sp.Matrix, x: sp.Matrix):
+    """
+    Compute the matrix divergence, i.e. the Euclidean divergence applied row-wise to a matrix
+    :param a:
+    :param x:
+    :return:
+    """
+    n, m = a.shape
+    d = sp.zeros(n, 1)
+    for i in range(n):
+        for j in range(m):
+            d[i] += sp.simplify(sp.diff(a[i, j], x[j]))
+    return sp.simplify(d)
+
+
+def hessian(f: sp.Matrix, x: sp.Matrix, return_grad=False):
+    """
+    Compute the Hessian of a scalar field.
+    :param f:
+    :param x:
+    :param return_grad: whether to return (hessian, gradient) or just hessian
+    :return:
+    """
+    grad_f = f.jacobian(x)
+    hess_f = grad_f.jacobian(x)
+    if return_grad:
+        return hess_f, grad_f.T
+    else:
+        return hess_f
 
 
 def metric_tensor(chart, x):
@@ -31,7 +61,7 @@ def manifold_divergence(a: sp.Matrix, p: sp.Matrix, volume_measure):
     return drift
 
 
-def embedded_bm_coefficients(f : sp.Matrix, p : sp.Matrix):
+def embedded_bm_coefficients(f: sp.Matrix, p: sp.Matrix):
     """
     Compute the drift and diffusion coefficients of a Riemannian Brownian motion embedded in some
     large Euclidean space.
@@ -40,8 +70,8 @@ def embedded_bm_coefficients(f : sp.Matrix, p : sp.Matrix):
     :param p: sympy matrix, the point (x,y,z) etc
     :return: tuple of (drift, P, H), of the drift vector, orthogonal projection matrix, and orthonormal frame matrix
     """
-    D = p.shape[0] # Embedded dimension
-    K = f.shape[0] # Codimension
+    D = p.shape[0]  # Embedded dimension
+    K = f.shape[0]  # Codimension
     # Compute the Jacobian of the implicit function
     Df = f.jacobian(p)
     # Orthonormalize $ N^T N = Df^T A^{-1} Df, A=Df Df^T
@@ -54,19 +84,19 @@ def embedded_bm_coefficients(f : sp.Matrix, p : sp.Matrix):
     U, S, V = P.singular_value_decomposition()
     H = U * sp.sqrt(S)
 
-    d = D-K
+    d = D - K
     H = sp.simplify(H[:, 0:d])
     # Compute the drift: the mean-curvature times the normal vector
     C = sp.simplify(B.cholesky(hermitian=False))
     N = sp.simplify(C * Df)
-    mean_curvature = -matrix_divergence(N, p)/2
+    mean_curvature = -matrix_divergence(N, p) / 2
     # Second order term for intersections of hypersurfaces
     q = sp.Matrix.zeros(K, 1)
     if K > 1:
         for i in range(K):
             Dn = sp.simplify(N[i, :].jacobian(p))
-            q[i] = sp.simplify(sp.Trace(N*Dn*N.T))
-        q = q/2
+            q[i] = sp.simplify(sp.Trace(N * Dn * N.T))
+        q = q / 2
     drift = sp.simplify(N.T * (mean_curvature + q))
     return drift, P, H
 
@@ -123,7 +153,7 @@ def adjoint_generator(f, p: sp.Matrix, drift: sp.Matrix, diffusion: sp.Matrix):
     :return:
     """
     Sigma = sp.simplify(diffusion * diffusion.T)
-    second_order_term = sp.simplify(matrix_divergence(Sigma*f, p)/2)
+    second_order_term = sp.simplify(matrix_divergence(Sigma * f, p) / 2)
     flux = sp.simplify(-drift * f + second_order_term)
     # Since matrix divergence is implemented row-wise.
     adjoint = sp.simplify(matrix_divergence(flux.T, p))
@@ -209,7 +239,13 @@ def lift_path(xt, f, m=3):
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    from solvers import euler_maruyama
+    from shillml.utils.solvers import euler_maruyama
+
+    x, y = sp.symbols("x y", real=True)
+    f = sp.Matrix([x ** 2 + x * y ** 2])
+    p = sp.Matrix([x, y])
+    print(hessian(f, p))
+
     # sympy input
     theta, phi = sp.symbols("theta phi", real=True, positive=True)
     x = sp.sin(theta) * sp.cos(phi)

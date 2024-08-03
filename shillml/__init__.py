@@ -1,2 +1,9 @@
-__all__ = ["ffnn", "neuralsdes", "pdes", "pointcloud", "processes", "sampler",
-           "sde_cas", "sdes", "solvers", "symcalc"]
+# shillml/__init__.py
+from . import diffgeo
+from . import losses
+from . import models
+from . import pdes
+from . import pointclouds
+from . import sdes
+from . import utils
+

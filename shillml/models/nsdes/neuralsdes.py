@@ -2,7 +2,7 @@
 # This works! for what its specified for--i.e. not proper manifolds.
 import torch
 import torch.nn as nn
-from shillml.ffnn import FeedForwardNeuralNet
+from shillml.models.ffnn import FeedForwardNeuralNet
 from typing import List, Callable
 
 
@@ -221,9 +221,9 @@ class NeuralSDE(nn.Module):
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import numpy as np
-    from shillml.ffnn import get_device
-    from shillml.sdes import SDE
-    from shillml.processes import get_process
+    from shillml.utils.utils import select_device
+    from shillml.sdes.sdes import SDE
+    from shillml.sdes.processes import get_process
 
     # Choose which SDE to run
     device = "cpu"
@@ -263,7 +263,7 @@ if __name__ == "__main__":
         test_ensemble[j, :, :] = ensemble[j, ntrain:, :]
     # Fit the Neural SDE
     nsde = NeuralSDE(state_dim, hidden_dim, drift_act, diffusion_act, noise_dim)
-    nsde.to(device=get_device(device))
+    nsde.to(device=select_device(device))
     nsde.fit(training_ensemble, lr, epochs, printfreq, h, weight_decay, scheme)
     mu_f, cov_f, sigma_f = nsde(test_ensemble)
     test_loss = 0.

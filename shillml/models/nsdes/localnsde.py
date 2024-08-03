@@ -5,9 +5,9 @@ import numpy as np
 from torch import Tensor
 
 
-from shillml.ffnn import FeedForwardNeuralNet
-from shillml.autoencoders import AutoEncoder
-from shillml.sdes import SDE
+from shillml.models.ffnn import FeedForwardNeuralNet
+from shillml.models.autoencoders import AE
+from shillml.sdes.sdes import SDE
 
 
 class LatentNeuralSDE(nn.Module):
@@ -78,7 +78,7 @@ class LatentNeuralSDE(nn.Module):
 class AutoEncoderDiffusionGeometry(nn.Module):
     def __init__(self,
                  latent_sde: LatentNeuralSDE,
-                 ae: AutoEncoder,
+                 ae: AE,
                  *args,
                  **kwargs):
         """
@@ -126,7 +126,7 @@ class AutoEncoderDiffusionGeometry(nn.Module):
 
 class AutoEncoderDiffusion(AutoEncoderDiffusionGeometry):
 
-    def __init__(self, latent_sde: LatentNeuralSDE, ae: AutoEncoder, *args, **kwargs):
+    def __init__(self, latent_sde: LatentNeuralSDE, ae: AE, *args, **kwargs):
         super().__init__(latent_sde, ae, *args, **kwargs)
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
@@ -146,7 +146,7 @@ class AutoEncoderDiffusion(AutoEncoderDiffusionGeometry):
 
 class AutoEncoderDrift(AutoEncoderDiffusionGeometry):
 
-    def __init__(self, latent_sde: LatentNeuralSDE, ae: AutoEncoder, *args, **kwargs):
+    def __init__(self, latent_sde: LatentNeuralSDE, ae: AE, *args, **kwargs):
         super().__init__(latent_sde, ae, *args, **kwargs)
 
     def forward(self, x: Tensor) -> Tensor:
