@@ -336,20 +336,4 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.show()
 
-    samples = hmc_sampling(
-        model,
-        num_samples=1000
-    )
 
-    plt.figure(figsize=(10, 5))
-
-    plt.subplot(1, 2, 1)
-    plt.scatter(data[:, 0], data[:, 1], alpha=0.5, s=1)
-    plt.title("Original Data")
-
-    plt.subplot(1, 2, 2)
-    plt.scatter(samples[:, 0].detach(), samples[:, 1].detach(), alpha=0.5, s=1)
-    plt.title("Generated Samples")
-
-    plt.tight_layout()
-    plt.show()
