@@ -1,5 +1,15 @@
+"""
+    This module implements an arbitrary feed-forward neural network. The user can specify
+    the number of neurons per layer, the activation function applied to each layer, and the
+    total number of layers.
+
+    The class has methods to compute the Jacobian matrix and Hessian tensor of the output of the
+    network with respect to its inputs. It can handle batched samples of high dimensional points
+    or batches of sample paths (time-series).
+"""
 from typing import List, Callable, Optional, Any
 from torch import Tensor
+
 import torch.nn.functional as func
 import matplotlib.pyplot as plt
 import torch.nn as nn
