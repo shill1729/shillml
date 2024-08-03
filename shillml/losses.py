@@ -78,6 +78,12 @@ from torch import Tensor
 from torch.utils.data import TensorDataset, DataLoader
 from typing import Any, Optional, Union, List, Tuple
 
+import torch
+import torch.nn as nn
+from torch import Tensor
+from torch.utils.data import TensorDataset, DataLoader
+from typing import Any, Optional, Union, List, Tuple
+
 
 def fit_model(model: nn.Module,
               loss: nn.Module,
@@ -111,12 +117,12 @@ def fit_model(model: nn.Module,
     if batch_size is None:
         batch_size = input_data.size(0)
 
-    # Convert targets to a list of tensors if it's not already
+    # Convert targets to a tuple if it's not already a tuple or list
     if isinstance(targets, Tensor):
-        targets = [targets]
-    elif isinstance(targets, (list, tuple)):
-        targets = list(targets)
-    else:
+        targets = (targets,)
+    elif isinstance(targets, list):
+        targets = tuple(targets)
+    elif not isinstance(targets, tuple):
         raise ValueError("targets must be a Tensor, List of Tensors, or Tuple of Tensors")
 
     dataset = TensorDataset(input_data, *targets)
@@ -137,11 +143,8 @@ def fit_model(model: nn.Module,
             optimizer.zero_grad()
             output = model(batch_input)
 
-            # Adjust loss function call based on number of targets
-            if len(batch_targets) == 1:
-                loss_value = loss(output, batch_targets[0])
-            else:
-                loss_value = loss(output, *batch_targets)
+            # Always pass batch_targets as a tuple to the loss function
+            loss_value = loss(output, batch_targets)
 
             loss_value.backward()
             optimizer.step()
