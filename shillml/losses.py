@@ -125,7 +125,7 @@ def fit_model(model: nn.Module,
     elif not isinstance(targets, tuple):
         raise ValueError("targets must be a Tensor, List of Tensors, or Tuple of Tensors")
 
-    dataset = TensorDataset(input_data, *targets)
+    dataset = TensorDataset(*[input_data, *targets])
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=lr, weight_decay=weight_decay)
     callbacks = callbacks or []
