@@ -1,4 +1,6 @@
 from typing import List
+
+import matplotlib.pyplot as plt
 from torch import Tensor
 
 import torch.nn as nn
@@ -206,3 +208,39 @@ class AE(nn.Module):
         else:
             raise ValueError("'ax' cannot be None")
         return None
+
+
+if __name__ == "__main__":
+    from shillml.utils import fit_model
+    from shillml.losses import AELoss
+    import sympy as sp
+    from shillml.diffgeo import RiemannianManifold
+    from shillml.pointclouds import PointCloud
+    from shillml.utils import process_data
+    # Generate data
+    u, v = sp.symbols("u v", real=True)
+    local_coordinates = sp.Matrix([u, v])
+    bounds = [(-1, 1), (-1, 1)]
+    c1 = 1
+    c2 = 1
+    chart = sp.Matrix([u, v, (u / c1) ** 2 + (v / c2) ** 2])
+    manifold = RiemannianManifold(local_coordinates, chart)
+    local_drift = manifold.local_bm_drift()
+    local_diffusion = manifold.local_bm_diffusion()
+    cloud = PointCloud(manifold, bounds, local_drift, local_diffusion)
+    x, _, mu, cov, _ = cloud.generate(30)
+    x, mu, cov, p, orthogcomp = process_data(x, mu, cov, d=2)
+    # Define model
+    ae = AE(3, 2, [64], nn.Tanh(), nn.Tanh())
+    ae_loss = AELoss()
+    # Fit the model
+    fit_model(ae, ae_loss, x, epochs=5000, batch_size=10)
+    # Detach and plot
+    x = x.detach()
+    fig = plt.figure()
+    ax = plt.subplot(111, projection="3d")
+    ax.scatter(x[:, 0], x[:, 1], x[:, 2])
+    ae.plot_surface(-1, 1, grid_size=30, ax=ax, title="ae")
+    plt.show()
+
+

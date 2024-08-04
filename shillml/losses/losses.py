@@ -1,12 +1,11 @@
-from typing import Optional
+from typing import Optional, Any, Tuple, List, Union
 
 import torch
 import torch.nn as nn
 from torch import Tensor
 
-
 from shillml.models.autoencoders import AE, CAE, CHAE, TBAE, CTBAE, CUCTBAE, CUCHTBAE
-from shillml.models.nsdes import AutoEncoderDiffusion
+from shillml.models.nsdes import AutoEncoderDiffusion, AutoEncoderDrift
 
 
 def contractive_regularization(encoder_jacobian: Tensor) -> Tensor:
@@ -68,7 +67,7 @@ class AELoss(nn.Module):
         super().__init__(*args, **kwargs)
         self.reconstruction_loss = nn.MSELoss()
 
-    def forward(self, ae: AE, x: Tensor, drift: Optional[Tensor] = None, cov: Optional[Tensor] = None):
+    def forward(self, ae: AE, x: Tensor, targets: Optional[Tensor] = None):
         x_hat = ae.forward(x)
         return self.reconstruction_loss(x_hat, x)
 
@@ -79,7 +78,7 @@ class CAELoss(AELoss):
         self.contractive_weight = contractive_weight
         self.contractive_reg = contractive_regularization
 
-    def forward(self, cae: CAE, x: Tensor, drift: Optional[Tensor] = None, cov: Optional[Tensor] = None):
+    def forward(self, cae: CAE, x: Tensor, targets: Optional[Tensor] = None):
         x_hat, dpi = cae.forward(x)
         reconstruction_loss = self.reconstruction_loss(x_hat, x)
         contractive_penalty = self.contractive_weight * self.contractive_reg(dpi)
@@ -93,7 +92,7 @@ class CHAELoss(CAELoss):
         self.hessian_weight = hessian_weight
         self.hessian_reg = hessian_regularization
 
-    def forward(self, chae: CHAE, x: Tensor, drift: Optional[Tensor] = None, cov: Optional[Tensor] = None):
+    def forward(self, chae: CHAE, x: Tensor, targets: Optional[Tensor] = None):
         x_hat, dpi, hessian_pi = chae.forward(x)
         reconstruction_loss = self.reconstruction_loss(x_hat, x)
         contractive_loss = self.contractive_weight * self.contractive_reg(dpi)
@@ -104,107 +103,104 @@ class CHAELoss(CAELoss):
 
 class TBAELoss(AELoss):
     def __init__(self,
-                 observed_projection=None,
                  tangent_bundle_weight=1.,
                  norm="fro",
                  *args,
                  **kwargs):
         super().__init__(*args, **kwargs)
-        if observed_projection is None:
-            raise ValueError("'observed_projection' cannot be 'None'.")
         self.tangent_bundle_weight = tangent_bundle_weight
         self.tangent_bundle_reg = MatrixMSELoss(norm=norm)
-        self.observed_projection = observed_projection
 
-    def forward(self, tbae: TBAE, x: Tensor, drift: Optional[Tensor] = None, cov: Optional[Tensor] = None):
+    def forward(self, tbae: TBAE, x: Tensor, target: Optional[Tensor] = None):
         x_hat, model_projection = tbae.forward(x)
         reconstruction_mse = self.reconstruction_loss(x_hat, x)
-        tangent_mse = self.tangent_bundle_weight * self.tangent_bundle_reg(model_projection, self.observed_projection)
+        tangent_mse = self.tangent_bundle_weight * self.tangent_bundle_reg(model_projection, target)
         total_loss = reconstruction_mse + tangent_mse
         return total_loss
 
 
 class CTBAELoss(TBAELoss, CAELoss):
     def __init__(self,
-                 observed_projection=None,
                  tangent_bundle_weight=1.,
                  contractive_weight=1.,
                  norm="fro",
                  *args,
                  **kwargs):
-        TBAELoss.__init__(self, observed_projection, tangent_bundle_weight, norm, *args, **kwargs)
-        CAELoss.__init__(self, contractive_weight, *args, **kwargs)
+        CAELoss.__init__(self, contractive_weight=contractive_weight, *args, **kwargs)
+        TBAELoss.__init__(self, tangent_bundle_weight=tangent_bundle_weight, norm=norm, *args, **kwargs)
 
-    def forward(self, ctbae: CTBAE, x: Tensor, drift: Optional[Tensor] = None, cov: Optional[Tensor] = None):
+    def forward(self, ctbae: CTBAE, x: Tensor, orthog_proj: Optional[Tensor] = None):
         x_hat, dpi, model_projection = ctbae.forward(x)
         mse = self.reconstruction_loss(x_hat, x)
         contractive_penalty = self.contractive_reg(dpi) * self.contractive_weight
-        tangent_error = self.tangent_bundle_weight * self.tangent_bundle_reg(model_projection, self.observed_projection)
+        tangent_error = self.tangent_bundle_weight * self.tangent_bundle_reg(model_projection, orthog_proj)
         total_loss = mse + contractive_penalty + tangent_error
         return total_loss
 
 
 class CUCTBAELoss(CTBAELoss):
     def __init__(self,
-                 tangent_drift_weight=1.,
-                 observed_projection=None,
-                 tangent_bundle_weight=1.,
                  contractive_weight=1.,
+                 tangent_drift_weight=1.,
+                 tangent_bundle_weight=1.,
                  norm="fro",
                  *args,
                  **kwargs):
-        super().__init__(observed_projection, tangent_bundle_weight, contractive_weight, norm, *args, **kwargs)
-        self.curvature_weight = tangent_drift_weight
+        super().__init__(tangent_bundle_weight=tangent_bundle_weight,
+                         contractive_weight=contractive_weight,
+                         norm=norm, *args, **kwargs)
+        self.tangent_drift_weight = tangent_drift_weight
         self.tangent_drift_loss = tangent_drift_loss
-        n, D, _ = self.observed_projection.size()
-        self.extrinsic_dim = D
-        self.observed_normal_projection = torch.eye(D).expand(n, D, D) - self.observed_projection
 
-    def forward(self, cuctbae: CUCTBAE, x: Tensor, drift: Optional[Tensor] = None, cov: Optional[Tensor] = None):
+    def forward(self, cuctbae: CUCTBAE, x: Tensor, targets: Optional[Union[Tensor, Tuple[Tensor, ...]]] = None):
         x_hat, dpi, model_projection, decoder_hessian = cuctbae.forward(x)
-        # x, ambient_drift, ambient_cov, observed_proj = targets
+        observed_projection, observed_normal_projection, drift, cov = targets
         bbt_proxy = torch.bmm(torch.bmm(dpi, cov), dpi.mT)
         qv = torch.stack(
             [torch.einsum("nii -> n", torch.bmm(bbt_proxy, decoder_hessian[:, i, :, :])) for i in
-             range(self.extrinsic_dim)])
+             range(x.size(1))])
         qv = qv.T
         tangent_vector = drift - 0.5 * qv
-        normal_proj_vector = torch.bmm(self.observed_normal_projection, tangent_vector.unsqueeze(2))
+        normal_proj_vector = torch.bmm(observed_normal_projection, tangent_vector.unsqueeze(2))
         mse = self.reconstruction_loss(x_hat, x)
         contractive_penalty = self.contractive_reg(dpi) * self.contractive_weight
         tangent_bundle_error = self.tangent_bundle_weight * self.tangent_bundle_reg(model_projection,
-                                                                                    self.observed_projection)
-        tangent_drift_error = self.curvature_weight * self.tangent_drift_loss(normal_proj_vector)
+                                                                                    observed_projection)
+        tangent_drift_error = self.tangent_drift_weight * self.tangent_drift_loss(normal_proj_vector)
         total_loss = mse + contractive_penalty + tangent_bundle_error + tangent_drift_error
         return total_loss
 
 
-class CUCHTBAELoss(CUCTBAELoss, CHAELoss):
+class CUCHTBAELoss(CHAELoss, CUCTBAELoss):
     def __init__(self,
                  contractive_weight=1.,
                  hessian_weight=1.,
                  tangent_bundle_weight=1.,
                  tangent_drift_weight=1.,
-                 observed_projection=None,
                  norm="fro",
                  *args,
                  **kwargs):
-        CHAELoss.__init__(self, contractive_weight, hessian_weight, *args, **kwargs)
-        CUCTBAELoss.__init__(self, tangent_drift_weight, observed_projection, tangent_bundle_weight, contractive_weight, norm, *args, **kwargs)
+        CUCTBAELoss.__init__(self, tangent_drift_weight=tangent_drift_weight,
+                             tangent_bundle_weight=tangent_bundle_weight,
+                             contractive_weight=contractive_weight,
+                             norm=norm, *args, **kwargs)
+        CHAELoss.__init__(self, contractive_weight=contractive_weight,
+                          hessian_weight=hessian_weight, *args, **kwargs)
 
-    def forward(self, cuchtbae: CUCHTBAE, x: Tensor, drift: Optional[Tensor] = None, cov: Optional[Tensor] = None):
+    def forward(self, cuchtbae: CUCHTBAE, x: Tensor, targets: Optional[Union[Tensor, Tuple[Tensor, ...]]] = None):
         x_hat, dpi, model_projection, decoder_hessian, encoder_hessian = cuchtbae.forward(x)
+        observed_projection, observed_normal_projection, drift, cov = targets
         bbt_proxy = torch.bmm(torch.bmm(dpi, cov), dpi.mT)
         qv = torch.stack(
             [torch.einsum("nii -> n", torch.bmm(bbt_proxy, decoder_hessian[:, i, :, :])) for i in
-             range(self.extrinsic_dim)])
+             range(x.size(1))])
         qv = qv.T
         tangent_vector = drift - 0.5 * qv
-        normal_proj_vector = torch.bmm(self.observed_normal_projection, tangent_vector.unsqueeze(2))
+        normal_proj_vector = torch.bmm(observed_normal_projection, tangent_vector.unsqueeze(2))
         mse = self.reconstruction_loss(x_hat, x)
         contr = self.contractive_reg(dpi) * self.contractive_weight
         hess = self.hessian_weight * self.hessian_reg(encoder_hessian)
-        tang = self.tangent_bundle_weight * self.tangent_bundle_reg(model_projection, self.observed_projection)
+        tang = self.tangent_bundle_weight * self.tangent_bundle_reg(model_projection, observed_projection)
         curv = self.tangent_drift_weight * self.tangent_drift_loss(normal_proj_vector)
         total_loss = mse + contr + tang + curv + hess
         return total_loss
@@ -218,13 +214,33 @@ class DiffusionLoss(nn.Module):
         self.local_cov_mse = MatrixMSELoss(norm=norm)
         self.tangent_drift_loss = tangent_drift_loss
 
-    def forward(self, ae_diffusion: AutoEncoderDiffusion, x, ambient_drift, ambient_cov, encoded_cov):
+    def forward(self, ae_diffusion: AutoEncoderDiffusion, x, targets):
         model_cov, normal_proj, qv, bbt = ae_diffusion.forward(x)
+        ambient_drift, ambient_cov, encoded_cov = targets
         tangent_vector = ambient_drift - 0.5 * qv
         normal_proj_vector = torch.bmm(normal_proj, tangent_vector.unsqueeze(2))
         cov_mse = self.cov_mse(model_cov, ambient_cov)
         # Add local cov mse
         local_cov_mse = self.local_cov_mse(bbt, encoded_cov)
-        normal_bundle_loss = self.normal_bundle_loss(normal_proj_vector)
+        normal_bundle_loss = self.tangent_drift_loss(normal_proj_vector)
         total_loss = cov_mse + local_cov_mse + self.tangent_drift_weight * normal_bundle_loss
         return total_loss
+
+
+class DriftMSELoss(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(self, drift_model: AutoEncoderDrift, x: Tensor, observed_ambient_drift: Tensor) -> Tensor:
+        """
+        Computes the mean squared error (MSE) between observed and model ambient drift vectors.
+
+        Args:
+            model_ambient_drift (Tensor): Model ambient drift vector.
+            observed_ambient_drift (Tensor): Observed ambient drift vector.
+
+        Returns:
+            Tensor: Mean squared error between observed and model ambient drift vectors.
+        """
+        model_ambient_drift = drift_model(x)
+        return torch.mean(torch.linalg.vector_norm(model_ambient_drift - observed_ambient_drift, ord=2, dim=1) ** 2)

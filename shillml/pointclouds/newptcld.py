@@ -4,6 +4,7 @@ from shillml.sdes import SDE
 from shillml.utils.sampler import ImportanceSampler
 from shillml.diffgeo import RiemannianManifold
 from matplotlib.patches import Ellipse
+import numpy as np
 
 
 class PointCloud:

@@ -95,7 +95,7 @@ class PointCloud:
 
         :param n: Number of points to generate
         :param seed: random seed
-        :return: Tuple of (points, weights, extrinsic_drifts, extrinsic_covariances)
+        :return: Tuple of (points, weights, extrinsic_drifts, extrinsic_covariances, local_points)
         """
         param_samples, weights = self.sampler.sample(n, seed)
         points = np.array([self.np_phi(*sample) for sample in param_samples])

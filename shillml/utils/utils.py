@@ -7,10 +7,23 @@
     select_device: choose the computational device: cpu or gpu (cuda, or mps)
 
 """
+from typing import Union, List, Tuple, Optional
+
 import torch
 from torch import nn, Tensor
 from torch.utils.data import DataLoader, TensorDataset
-from typing import Union, List, Tuple, Optional
+
+
+def process_data(x, mu, cov, d):
+    x = torch.tensor(x, dtype=torch.float32)
+    mu = torch.tensor(mu, dtype=torch.float32)
+    cov = torch.tensor(cov, dtype=torch.float32)
+    left_singular_vectors = torch.linalg.svd(cov)[0]
+    orthonormal_frame = left_singular_vectors[:, :, 0:d]
+    observed_projection = torch.bmm(orthonormal_frame, orthonormal_frame.mT)
+    n, D, _ = observed_projection.size()
+    observed_normal_projection = torch.eye(D).expand(n, D, D) - observed_projection
+    return x, mu, cov, observed_projection, observed_normal_projection
 
 
 def fit_model(model: nn.Module,
@@ -22,24 +35,6 @@ def fit_model(model: nn.Module,
               print_freq: int = 1000,
               weight_decay: float = 0.,
               batch_size: int = None) -> None:
-    """
-    Trains the given model using the specified loss function and data.
-    Assumes the input of the loss function is (model, input_data, extra1, extra2, ...) where extras can be a single
-    tensor or a tuple of tensors.
-
-    Args:
-        model (nn.Module): The neural network model to be trained.
-        loss (nn.Module): The loss function used for training.
-        input_data (Tensor): Input data to the network model.
-        targets (Union[Tensor, List[Tensor], Tuple[Tensor, ...]]): Labels/targets data for the network output.
-        lr (float, optional): Learning rate for the optimizer. Defaults to 0.001.
-        epochs (int, optional): Number of epochs to train the model. Defaults to 1000.
-        print_freq (int, optional): Frequency of printing the training loss. Defaults to 1000.
-        weight_decay (float, optional): Weight decay (L2 penalty) for the optimizer. Defaults to 0.
-        batch_size (int, optional): Batch size for the DataLoader. Defaults to None (which means use the full dataset).
-    Returns:
-        None
-    """
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=lr, weight_decay=weight_decay)
 
     # If batch_size is None or larger than dataset, use the full dataset as one batch
@@ -47,8 +42,13 @@ def fit_model(model: nn.Module,
         batch_size = len(input_data)
 
     # Create TensorDataset and DataLoader
-    dataset = TensorDataset(*[input_data, *targets]) if isinstance(targets, (list, tuple)) else TensorDataset(input_data,
-                                                                                                           targets)
+    if targets is None:
+        dataset = TensorDataset(input_data)
+    elif isinstance(targets, (list, tuple)):
+        dataset = TensorDataset(input_data, *targets)
+    else:
+        dataset = TensorDataset(input_data, targets)
+
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     for epoch in range(epochs + 1):
@@ -58,10 +58,9 @@ def fit_model(model: nn.Module,
         for batch in dataloader:
             optimizer.zero_grad()
             inputs = batch[0]
-            extra_targets = batch[1:]  # Extract remaining tensors in the batch as extra targets
-            extra_targets = extra_targets[0] if len(extra_targets) == 1 else extra_targets
-            # This works for score-based. but will it work for AE?
-            loss_value = loss(model, inputs, *[extra_targets])
+            extra_targets = batch[1:] if len(batch) > 1 else None  # Extract remaining tensors in the batch as extra targets
+            extra_targets = extra_targets[0] if extra_targets and len(extra_targets) == 1 else extra_targets
+            loss_value = loss(model, inputs, extra_targets)
             loss_value.backward()
             optimizer.step()
             epoch_loss += loss_value.item()  # Accumulate batch loss into epoch loss
