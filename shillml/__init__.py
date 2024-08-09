@@ -5,7 +5,7 @@
 # from . import models
 # from . import losses
 # from . import pdes
-# from . import pointclouds
+from . import pointclouds
 
 
 
