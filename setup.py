@@ -8,7 +8,7 @@ def parse_requirements(filename):
 
 setup(
     name='shillml',
-    version='0.0.62',
+    version='0.0.63',
     packages=['shillml'],
     url='https://github.com/shill1729/shillml',
     install_requires=parse_requirements("requirements.txt"),
