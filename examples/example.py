@@ -4,10 +4,10 @@ import sympy as sp
 import numpy as np
 import matplotlib.pyplot as plt
 from shillml.utils import fit_model, process_data, set_grad_tracking
-from shillml.losses import CUCHTBAELoss, DiffusionLoss, DriftMSELoss
+from shillml.losses import DACHTBAELoss, DiffusionLoss, DriftMSELoss
 from shillml.diffgeo import RiemannianManifold
 from shillml.pointclouds import PointCloud
-from shillml.models.autoencoders import CUCHTBAE
+from shillml.models.autoencoders import DACHTBAE
 from shillml.models.nsdes import AutoEncoderDrift, AutoEncoderDiffusion, LatentNeuralSDE
 
 
@@ -26,8 +26,8 @@ def generate_data(bounds, c1, c2, num_points):
 
 def define_ae_model(input_dim, latent_dim, hidden_layers, activation, regularization_weights):
     contractive_weight, hessian_weight, tangent_drift_weight, tangent_bundle_weight = regularization_weights
-    ae = CUCHTBAE(input_dim, latent_dim, hidden_layers, activation(), activation())
-    ae_loss = CUCHTBAELoss(contractive_weight=contractive_weight,
+    ae = DACHTBAE(input_dim, latent_dim, hidden_layers, activation(), activation())
+    ae_loss = DACHTBAELoss(contractive_weight=contractive_weight,
                            hessian_weight=hessian_weight,
                            tangent_drift_weight=tangent_drift_weight,
                            tangent_bundle_weight=tangent_bundle_weight)
@@ -55,7 +55,7 @@ def fit_diffusion_model(ae, latent_sde, x, mu, cov, lr, epochs, batch_size, tang
 def compute_test_loss(ae, model_drift, model_diffusion, x, mu, cov, p, orthogcomp):
     diffusion_loss = DiffusionLoss(tangent_drift_weight=1.)
     drift_loss = DriftMSELoss()
-    ae_loss = CUCHTBAELoss()
+    ae_loss = DACHTBAELoss()
     dpi = ae.encoder.jacobian_network(x).detach()
     encoded_cov = torch.bmm(torch.bmm(dpi, cov), dpi.mT)
     dl = diffusion_loss.forward(model_diffusion, x, (mu, cov, encoded_cov))
