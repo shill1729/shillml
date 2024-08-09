@@ -29,9 +29,9 @@ class Surfaces:
         self.u, self.v = sp.symbols('u v', real=True)
         self.R = 2
         self.r = 1
-        self.c1 = 5
-        self.c2 = 5
-        self.sd = 5
+        self.c1 = 8
+        self.c2 = 8
+        self.sd = 10
         self.surface_bounds = {
             'quartic': [(-1, 1), (-1, 1)],
             'paraboloid': [(-1, 1), (-1, 1)],

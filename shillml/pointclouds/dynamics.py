@@ -1,5 +1,6 @@
 import sympy as sp
 
+
 class SDECoefficients:
     def __init__(self):
         """
@@ -14,7 +15,8 @@ class SDECoefficients:
         """
         self.u, self.v = sp.symbols(names="u v", real=True)
 
-    def drift_zero(self):
+    @staticmethod
+    def drift_zero():
         """
         Define the zero drift vector.
 

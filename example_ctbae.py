@@ -4,10 +4,10 @@ import sympy as sp
 import numpy as np
 import matplotlib.pyplot as plt
 from shillml.utils import fit_model, process_data, set_grad_tracking
-from shillml.losses import CUCHTBAELoss, DiffusionLoss, DriftMSELoss
+from shillml.losses import CTBAELoss, DiffusionLoss, DriftMSELoss
 from shillml.diffgeo import RiemannianManifold
 from shillml.pointclouds import PointCloud
-from shillml.models.autoencoders import CUCHTBAE
+from shillml.models.autoencoders import CTBAE
 from shillml.models.nsdes import AutoEncoderDrift, AutoEncoderDiffusion, LatentNeuralSDE
 
 
@@ -26,11 +26,9 @@ def generate_data(bounds, c1, c2, num_points):
 
 def define_ae_model(input_dim, latent_dim, hidden_layers, activation, regularization_weights):
     contractive_weight, hessian_weight, tangent_drift_weight, tangent_bundle_weight = regularization_weights
-    ae = CUCHTBAE(input_dim, latent_dim, hidden_layers, activation(), activation())
-    ae_loss = CUCHTBAELoss(contractive_weight=contractive_weight,
-                           hessian_weight=hessian_weight,
-                           tangent_drift_weight=tangent_drift_weight,
-                           tangent_bundle_weight=tangent_bundle_weight)
+    ae = CTBAE(input_dim, latent_dim, hidden_layers, activation(), activation())
+    ae_loss = CTBAELoss(contractive_weight=contractive_weight,
+                        tangent_bundle_weight=tangent_bundle_weight)
     return ae, ae_loss
 
 
@@ -39,13 +37,13 @@ def define_diffusion_model(latent_dim, hidden_layers, activation):
     return latent_sde
 
 
-def fit_diffusion_model(ae, latent_sde, x, mu, cov, lr, epochs, batch_size, tangent_drift_weight):
+def fit_diffusion_model(ae, latent_sde, x, mu, cov, epochs, batch_size, tangent_drift_weight):
     model_drift = AutoEncoderDrift(latent_sde, ae)
     model_diffusion = AutoEncoderDiffusion(latent_sde, ae)
     dpi = ae.encoder.jacobian_network(x).detach()
     encoded_cov = torch.bmm(torch.bmm(dpi, cov), dpi.mT)
     diffusion_loss = DiffusionLoss(tangent_drift_weight=tangent_drift_weight)
-    fit_model(model_diffusion, diffusion_loss, x, (mu, cov, encoded_cov), lr=lr, epochs=epochs, batch_size=batch_size)
+    fit_model(model_diffusion, diffusion_loss, x, (mu, cov, encoded_cov), epochs=epochs, batch_size=batch_size)
     set_grad_tracking(latent_sde.diffusion_net, False)
     drift_loss = DriftMSELoss()
     fit_model(model_drift, drift_loss, x, mu, epochs=epochs, batch_size=batch_size)
@@ -55,45 +53,49 @@ def fit_diffusion_model(ae, latent_sde, x, mu, cov, lr, epochs, batch_size, tang
 def compute_test_loss(ae, model_drift, model_diffusion, x, mu, cov, p, orthogcomp):
     diffusion_loss = DiffusionLoss(tangent_drift_weight=1.)
     drift_loss = DriftMSELoss()
-    ae_loss = CUCHTBAELoss()
+    ae_loss = CTBAELoss()
     dpi = ae.encoder.jacobian_network(x).detach()
     encoded_cov = torch.bmm(torch.bmm(dpi, cov), dpi.mT)
     dl = diffusion_loss.forward(model_diffusion, x, (mu, cov, encoded_cov))
     drl = drift_loss(model_drift, x, mu)
-    aeloss = ae_loss.forward(ae, x, (p, orthogcomp, mu, cov))
+    aeloss = ae_loss.forward(ae, x, p)
     return dl, drl, aeloss
 
 
 def main():
-    epsilon = 0.5
+    epsilon = 0.1
     bounds = [(-1, 1), (-1, 1)]
     large_bounds = [(-1 - epsilon, 1 + epsilon), (-1 - epsilon, 1 + epsilon)]
     c1, c2 = 10, 10
-    num_points = 30
-    num_test = 500
+    num_points = 100
+    num_test = 100
     input_dim, latent_dim = 3, 2
-    hidden_layers = [64]
-    sde_layers = [64]
+    hidden_layers = [32]
+    sde_layers = [32]
     activation = nn.Tanh
-    lr = 0.0001
-    epochs_ae = 20000
-    epochs_sde = 50000
-    batch_size = 15
+    epochs = 10000
+    batch_size = 20
     ntime = 8000
     npaths = 10
     tn = 1
 
     # Regularization weights: ctr, hess, drift, bundle
-    regularization_weights = (0.01, 0., 0.0001, 0.01)
+    regularization_weights = (0.02, 0.0, 0.0001, 0.0001)
     tangent_drift_weight = regularization_weights[2]
 
     x, mu, cov, p, orthogcomp, cloud = generate_data(bounds, c1, c2, num_points)
+    # Plot true data
+    cloud.plot_point_cloud(x, mu, True, 0.05)
+    cloud.plot_point_cloud(x, cloud.observed_q, True, 0.05)
+    cloud.plot_point_cloud(x, cloud.observed_tangent_drift, True, 0.05)
+
+    # Fit
     ae, ae_loss = define_ae_model(input_dim, latent_dim, hidden_layers, activation, regularization_weights)
-    fit_model(ae, ae_loss, x, targets=(p, orthogcomp, mu, cov), lr=lr, epochs=epochs_ae, batch_size=batch_size)
+    fit_model(ae, ae_loss, x, targets=p, epochs=epochs, batch_size=batch_size)
     set_grad_tracking(ae, False)
 
     latent_sde = define_diffusion_model(latent_dim, sde_layers, activation)
-    model_drift, model_diffusion = fit_diffusion_model(ae, latent_sde, x, mu, cov, lr, epochs_sde, batch_size, tangent_drift_weight)
+    model_drift, model_diffusion = fit_diffusion_model(ae, latent_sde, x, mu, cov, epochs, batch_size, tangent_drift_weight)
 
     # Uncomment the following lines to visualize the results: test data
     x, mu, cov, p, orthogcomp, cloud = generate_data(large_bounds, c1, c2, num_test)

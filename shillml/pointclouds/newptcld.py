@@ -4,6 +4,7 @@ from shillml.sdes import SDE
 from shillml.utils.sampler import ImportanceSampler
 from shillml.diffgeo import RiemannianManifold
 from matplotlib.patches import Ellipse
+import matplotlib.pyplot as plt
 import numpy as np
 
 
@@ -19,6 +20,8 @@ class PointCloud:
                 :param local_drift: A function that takes params and returns the drift vector (optional)
                 :param local_diffusion: A function that takes params and returns the diffusion matrix (optional)
         """
+        self.observed_tangent_drift = None
+        self.observed_q = None
         self.manifold = manifold
         self.bounds = bounds
         self.dimension = len(manifold.local_coordinates)
@@ -42,26 +45,30 @@ class PointCloud:
             self.np_local_diffusion = self.manifold.sympy_to_numpy(self.local_diffusion)
             self.np_local_covariance = self.manifold.sympy_to_numpy(self.local_covariance)
 
+            self.q = self._compute_q()
+            self.tangent_drift = self._compute_tangent_drift()
             self.extrinsic_drift = self._compute_extrinsic_drift()
             self.extrinsic_covariance = self._compute_extrinsic_covariance()
+            self.np_q = self.manifold.sympy_to_numpy(self.q)
+            self.np_tangent_drift = self.manifold.sympy_to_numpy(self.tangent_drift)
             self.np_extrinsic_drift = self.manifold.sympy_to_numpy(self.extrinsic_drift)
             self.np_extrinsic_diffusion = self.manifold.sympy_to_numpy(self.chart_jacobian * self.local_diffusion)
             self.np_extrinsic_covariance = self.manifold.sympy_to_numpy(self.extrinsic_covariance)
 
             self._create_sdes()
 
-    def _create_importance_sampler(self):
-        return ImportanceSampler(
-            self.np_volume_measure,
-            *[bound for bounds in self.bounds for bound in bounds]
-        )
-
-    def _compute_extrinsic_drift(self):
+    def _compute_q(self):
         q = sp.zeros(self.target_dim, 1)
         for i in range(self.target_dim):
             hessian = sp.hessian(self.manifold.chart[i], self.manifold.local_coordinates)
-            q[i] = 0.5 * sp.trace(self.local_covariance * hessian)
-        return self.chart_jacobian * self.local_drift + q
+            q[i] = sp.trace(self.local_covariance * hessian)
+        return q
+
+    def _compute_tangent_drift(self):
+        return self.chart_jacobian * self.local_drift
+
+    def _compute_extrinsic_drift(self):
+        return self.tangent_drift + 0.5 * self.q
 
     def _compute_extrinsic_covariance(self):
         return self.chart_jacobian * self.local_covariance * self.chart_jacobian.T
@@ -72,6 +79,12 @@ class PointCloud:
         self.ambient_sde = SDE(lambda t, x: self.np_extrinsic_drift(*x).reshape(self.target_dim),
                                lambda t, x: self.np_extrinsic_diffusion(*x))
         return None
+
+    def _create_importance_sampler(self):
+        return ImportanceSampler(
+            self.np_volume_measure,
+            *[bound for bounds in self.bounds for bound in bounds]
+        )
 
     def generate(self, n: int = 1000, seed=None) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -85,15 +98,22 @@ class PointCloud:
         points = np.array([self.np_phi(*sample) for sample in param_samples])
 
         if hasattr(self, 'np_extrinsic_drift') and hasattr(self, 'np_extrinsic_covariance'):
+            true_q = np.array([self.np_q(*sample) for sample in param_samples])
+            tangent_drift = np.array([self.np_tangent_drift(*sample) for sample in param_samples])
             extrinsic_drifts = np.array([self.np_extrinsic_drift(*sample) for sample in param_samples])
             extrinsic_covariances = np.array([self.np_extrinsic_covariance(*sample) for sample in param_samples])
         else:
+            true_q = None
+            tangent_drift = None
             extrinsic_drifts = None
             extrinsic_covariances = None
 
+        self.observed_q = true_q
+        self.observed_tangent_drift = tangent_drift
+
         return points.squeeze(), weights, extrinsic_drifts.squeeze(), extrinsic_covariances, param_samples
 
-    def plot_point_cloud(self, points=None, weights=None, drifts=None, plot_drift=False,
+    def plot_point_cloud(self, points=None, drifts=None, plot_drift=False,
                          drift_scale=1.0, alpha=0.5, figsize=(10, 8)):
         """
         Plot the point cloud with an option to show the drift vector field.
@@ -106,24 +126,23 @@ class PointCloud:
         :param alpha: Transparency of points
         :param figsize: Figure size
         """
-        if points is None or weights is None or (plot_drift and drifts is None):
-            points, weights, drifts, cov, param_samples = self.generate(n=1000)
+        # if points is None or (plot_drift and drifts is None):
+        #     points, weights, drifts, cov, param_samples = self.generate(n=1000)
 
         fig = plt.figure(figsize=figsize)
         ax = fig.add_subplot(111, projection='3d')
 
         # Scale weights for point sizes
-        sizes = 50 * weights / np.max(weights)
+        # sizes = 50 * weights / np.max(weights)
 
         # Plot points
-        scatter = ax.scatter(points[:, 0], points[:, 1], points[:, 2],
-                             s=sizes, alpha=alpha, c=weights)
+        scatter = ax.scatter(points[:, 0], points[:, 1], points[:, 2], alpha=alpha)
 
         if plot_drift:
             # Plot drift vectors
             ax.quiver(points[:, 0], points[:, 1], points[:, 2],
                       drifts[:, 0], drifts[:, 1], drifts[:, 2],
-                      length=drift_scale, normalize=True, color='r')
+                      length=drift_scale, normalize=True, color='r', arrow_length_ratio=0.1)
 
         ax.set_xlabel('X')
         ax.set_ylabel('Y')

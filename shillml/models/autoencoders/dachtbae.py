@@ -4,9 +4,9 @@ from typing import List, Tuple
 from torch import Tensor
 
 
-class CUCTBAE(AE):
+class DACHTBAE(AE):
     """
-        Curvature Contractive Tangent Bundle Autoencoder (CUCTBAE) class that extends a standard autoencoder
+        Curvature Contractive Hessian Tangent Bundle Autoencoder (CUCHTBAE) class that extends a standard autoencoder
         to incorporate curvature regularization given an observed drift vector field and
         infinitesimal covariance matrix field. This regularization helps in
         preserving the local geometry of the data manifold.
@@ -17,7 +17,6 @@ class CUCTBAE(AE):
             encoder (FeedForwardNeuralNetwork): the FFNN representing the encoder
             decoder (FeedForwardNeuralNetwork): the FFNN representing the decoder
     """
-
     def __init__(self,
                  extrinsic_dim: int,
                  intrinsic_dim: int,
@@ -27,7 +26,7 @@ class CUCTBAE(AE):
                  *args,
                  **kwargs):
         """
-            Initializes the Curvature Contractive Tangent Bundle Autoencoder (CUCTBAE) with the specified parameters.
+            Initializes the Curvature Contractive Hessian Tangent Bundle Autoencoder (CUCHTBAE) with the specified parameters.
 
             Args:
                 extrinsic_dim (int): The dimensionality of the input data.
@@ -40,9 +39,9 @@ class CUCTBAE(AE):
         """
         super().__init__(extrinsic_dim, intrinsic_dim, hidden_dims, encoder_act, decoder_act, *args, **kwargs)
 
-    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
         """
-            Forward pass of the Curvature Contractive Tangent Bundle Autoencoder.
+            Forward pass of the Curvature Contractive Hessian Tangent Bundle Autoencoder.
 
             Args:
                 x (Tensor): Input tensor with shape (batch_size, extrinsic_dim).
@@ -58,6 +57,8 @@ class CUCTBAE(AE):
                 - decoder_hessian (Tensor): Hessian tensor of the decoder, a tensor with
                 shape (batch_size, extrinsic_dim, intrinsic_dim, extrinsic_dim)
 
+                - encoder_hessian (Tensor): Hessian tensor of the encoder, a tensor with
+                shape (batch_size, intrinsic_dim, extrinsic_dim, extrinsic_dim)
 
         """
         z = self.encoder(x)
@@ -65,12 +66,13 @@ class CUCTBAE(AE):
         dpi = self.encoder_jacobian(x)
         model_projection = self.neural_orthogonal_projection(z)
         decoder_hessian = self.decoder_hessian(z)
-        return x_hat, dpi, model_projection, decoder_hessian
+        encoder_hessian = self.encoder_hessian(x)
+        return x_hat, dpi, model_projection, decoder_hessian, encoder_hessian
 
 
 if __name__ == "__main__":
     from shillml.utils import fit_model
-    from shillml.losses import CUCTBAELoss
+    from shillml.losses import CUCHTBAELoss
     import sympy as sp
     from shillml.diffgeo import RiemannianManifold
     from shillml.pointclouds import PointCloud
@@ -90,8 +92,9 @@ if __name__ == "__main__":
     x, _, mu, cov, _ = cloud.generate(30)
     x, mu, cov, p, orthogcomp = process_data(x, mu, cov, d=2)
     # Define model
-    ae = CUCTBAE(3, 2, [64], nn.Tanh(), nn.Tanh())
-    ae_loss = CUCTBAELoss(contractive_weight=0.001, tangent_bundle_weight=0.01, tangent_drift_weight=0.01, norm="fro")
+    ae = DACHTBAE(3, 2, [8], nn.Tanh(), nn.Tanh())
+    ae_loss = CUCHTBAELoss(contractive_weight=0.005, hessian_weight=0.00001, tangent_drift_weight=0.0001,
+                           tangent_bundle_weight=0.001)
     fit_model(ae, ae_loss, x, targets=(p, orthogcomp, mu, cov), epochs=5000, batch_size=20)
     # Detach and plot
     x = x.detach()
