@@ -37,8 +37,8 @@ if __name__ == "__main__":
     drift_act = nn.GELU()
     diffusion_act = nn.GELU()
     lr = 0.0001
-    epochs_ae = 2
-    epochs_sde = 2
+    epochs_ae = 20000
+    epochs_sde = 20000
     batch_size = num_points
     ntime = 5000
     npaths = 10
