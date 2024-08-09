@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import torch
 from PIL import Image
 
-from shillml.autoencoders import AutoEncoder
+from shillml.models.autoencoders import AE
 
 
 class Callback:
@@ -29,7 +29,7 @@ class PlotSurfaceCallback(Callback):
     def on_train_begin(self, total_epochs):
         self.epoch_interval = max(1, total_epochs // self.num_frames)
 
-    def on_epoch_end(self, epoch, model: AutoEncoder, metrics):
+    def on_epoch_end(self, epoch, model: AE, metrics):
         if (epoch + 1) % self.epoch_interval == 0 or epoch == 0:
             fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
             model.plot_surface(self.a, self.b, self.grid_size, ax=ax, title=f"Epoch {epoch + 1}")
