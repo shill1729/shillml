@@ -1,3 +1,12 @@
+"""
+Run this AFTER 'ae_comparison.py'.
+
+This script loads a trained DACTBAE model, freezes its parameters, and fits two Stochastic Differential
+Equation (SDE) models—a drift SDE and a diffusion SDE—using the latent space of the autoencoder. The script
+computes various losses related to reconstruction, tangent bundle alignment, contraction, and SDE consistency
+for both interpolation and extrapolation tests. Results are summarized in a LaTeX table, and the model's
+performance is visualized by plotting the learned drift against the true drift in 3D.
+"""
 # Load in the CCTBAE
 # Fit the SDEs
 from examples.ae_comparison import *
@@ -5,8 +14,8 @@ from shillml.models.nsdes import LatentNeuralSDE, AutoEncoderDrift, AutoEncoderD
 from shillml.losses import DiffusionLoss, DriftMSELoss, MatrixMSELoss, contractive_regularization, tangent_drift_loss
 from shillml.utils import set_grad_tracking, fit_model
 
-diffusion_epochs = 10000
-drift_epochs = 10000
+diffusion_epochs = 30000
+drift_epochs = 50000
 sde_drift_alignment_weight = 0.0001
 h2 = [32]
 h3 = [64]
@@ -30,6 +39,8 @@ def load_model_weights(model, file_path):
 # Usage
 ctbae = DACTBAE(extrinsic_dim, intrinsic_dim, h1, encoder_act, decoder_act)
 ctbae = load_model_weights(ctbae, f"plots/{surface}/autoencoder/curve_ae.pth")
+# Switch surface in ae_comparison.py to load different trained AEs
+# ctbae = load_model_weights(ctbae, f"results/{surface}/{dynamics}/curve_ae.pth")
 
 # Make sure the AE is frozen
 set_grad_tracking(ctbae, False)
@@ -111,14 +122,15 @@ for loss_type, error_types in errors.items():
 latex_table += "\\end{tabular}\n"
 
 # Create a detailed caption
-caption = f"Interpolation and Extrapolation Errors for CTBAE+SDE Model. "
+caption = f"Interpolation and Extrapolation Errors for DACTBAE+SDE Model. "
 caption += f"Surface: {surface}. "
+caption += f"Local dynamics: {dynamics}. "
 caption += f"Network dimensions: {extrinsic_dim} (extrinsic) to {intrinsic_dim} (intrinsic). "
-caption += f"CTBAE hidden layers: {h1}. "
+caption += f"DACTBAE hidden layers: {h1}. "
 caption += f"Drift SDE hidden layers: {h2}. "
 caption += f"Diffusion SDE hidden layers: {h3}. "
-caption += f"CTBAE encoder activation: {encoder_act.__class__.__name__}. "
-caption += f"CTBAE decoder activation: {decoder_act.__class__.__name__}. "
+caption += f"DACTBAE encoder activation: {encoder_act.__class__.__name__}. "
+caption += f"DACTBAE decoder activation: {decoder_act.__class__.__name__}. "
 caption += f"Drift activation: {drift_act.__class__.__name__}. "
 caption += f"Diffusion activation: {diffusion_act.__class__.__name__}. "
 caption += f"CTBAE training epochs: {epochs}. "

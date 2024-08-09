@@ -75,9 +75,11 @@ def score_loss(drift_net, diffusion_net, x, k=1):
 def train(drift_net, diffusion_net, data, epochs=1000, lr=1e-3, batch_size=64):
     optimizer = optim.Adam(list(drift_net.parameters()) + list(diffusion_net.parameters()), lr=lr)
     dataset = torch.utils.data.TensorDataset(data)
+
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     for epoch in range(epochs):
+        loss = 0.
         for batch in dataloader:
             x = batch[0]
             x.requires_grad = True

@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
+
 
 
 class GroupNorm(nn.Module):
@@ -140,6 +142,6 @@ class Model(nn.Module):
 
 def get_timestep_embedding(timesteps, embedding_dim):
     half_dim = embedding_dim // 2
-    emb = torch.exp(torch.arange(half_dim, dtype=torch.float32) * -math.log(10000) / (half_dim - 1))
+    emb = torch.exp(torch.arange(half_dim, dtype=torch.float32) * -np.log(10000.) / (half_dim - 1))
     emb = timesteps[:, None].float() * emb[None, :]
     return torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)

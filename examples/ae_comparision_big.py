@@ -49,7 +49,6 @@ local_coordinates = sp.Matrix([u, v])
 for surface in surfaces_list:
     for dynamics in dynamics_list:
         # Set up surface and bounds
-        print(surfaces.surface_bounds.keys())
         if surface in surfaces.surface_bounds:
             chart = getattr(surfaces, surface)()
             bounds = surfaces.surface_bounds[surface]

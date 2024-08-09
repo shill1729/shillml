@@ -229,7 +229,20 @@ class CTBAELoss(TBAELoss, CAELoss):
 
 class DACTBAELoss(CTBAELoss):
     """
+    A custom loss function for the DACTBAE (Drift-Aligned Contractive Tangent Bundle Autoencoder) model,
+    which extends the CTBAELoss by adding a term that penalizes the deviation of the drift vector field projected
+    onto the normal space.
 
+    This loss function includes multiple components:
+    1. Reconstruction loss: Measures how well the reconstructed input matches the original input.
+    2. Contractive regularization: Penalizes the Jacobian of the encoder to encourage smoother mappings.
+    3. Tangent bundle regularization: Penalizes the difference between the model's projection onto the tangent bundle
+       and the observed tangent bundle projection.
+    4. Tangent drift loss: Penalizes the deviation of the drift vector projected onto the normal space.
+
+    Attributes:
+        tangent_drift_weight (float): Weight for the tangent drift loss component.
+        tangent_drift_loss (callable): The function to compute the tangent drift loss.
     """
     def __init__(self,
                  contractive_weight=1.,
@@ -280,6 +293,44 @@ class DACTBAELoss(CTBAELoss):
 
 
 class DACHTBAELoss(CHAELoss, DACTBAELoss):
+    """
+        A combined loss function class for DACHTBAE models, inheriting from both `CHAELoss` and `DACTBAELoss`.
+        This loss function integrates multiple regularization terms including:
+        - Contractive regularization
+        - Tangent Bundle regularization
+        - Drift alignment regularization
+        - Hessian regularization
+
+        The total loss is a weighted sum of these regularization terms along with a standard reconstruction loss.
+
+        Parameters:
+        -----------
+        contractive_weight : float, optional (default=1.0)
+            Weight applied to the contractive regularization term.
+        hessian_weight : float, optional (default=1.0)
+            Weight applied to the Hessian regularization term.
+        tangent_bundle_weight : float, optional (default=1.0)
+            Weight applied to the tangent bundle regularization term.
+        tangent_drift_weight : float, optional (default=1.0)
+            Weight applied to the tangent drift regularization term.
+        norm : str, optional (default="fro")
+            Norm type to be used in the regularization calculations.
+        args : tuple, optional
+            Additional positional arguments to be passed to the parent classes.
+        kwargs : dict, optional
+            Additional keyword arguments to be passed to the parent classes.
+
+        Attributes:
+        -----------
+        contractive_weight : float
+            Weight for the contractive regularization.
+        hessian_weight : float
+            Weight for the Hessian regularization.
+        tangent_bundle_weight : float
+            Weight for the tangent bundle regularization.
+        tangent_drift_weight : float
+            Weight for the tangent drift regularization.
+    """
     def __init__(self,
                  contractive_weight=1.,
                  hessian_weight=1.,
@@ -307,17 +358,36 @@ class DACHTBAELoss(CHAELoss, DACTBAELoss):
 
     def forward(self, dachtbae: DACHTBAE, x: Tensor, targets: Optional[Union[Tensor, Tuple[Tensor, ...]]] = None):
         """
-        Forward for the Loss function of a Autoencdoer with teh following regularizations:
+        Computes the total loss for the DACHTBAE model, combining reconstruction loss with several regularization terms:
+        - Contractive regularization
+        - Tangent Bundle regularization
+        - Drift alignment regularization
+        - Hessian regularization
 
-        1. Contractive
-        2. Tangent Bundle
-        3. Drift alignment
+        The loss function is designed for autoencoders that aim to preserve geometric structures during encoding, such as
+        those operating on manifolds.
 
-        :param dachtbae:
-        :param x:
-        :param targets: must be (p, n, mu, cov), where p is the orthogonal projection to tangent space, and
-        n is its complement
-        :return:
+        Parameters:
+        -----------
+        dachtbae : DACHTBAE
+            The DACHTBAE model whose output is being evaluated.
+        x : Tensor
+            Input tensor to the autoencoder.
+        targets : Optional[Union[Tensor, Tuple[Tensor, ...]]], optional
+            Targets for the loss function, must include (observed_projection, observed_normal_projection, drift, cov).
+            - observed_projection : Tensor
+                The orthogonal projection of the input to the tangent space.
+            - observed_normal_projection : Tensor
+                The complement of the tangent projection, representing the normal space.
+            - drift : Tensor
+                The drift vector for each data point.
+            - cov : Tensor
+                The covariance matrix for each data point.
+
+        Returns:
+        --------
+        total_loss : Tensor
+            The computed total loss, which includes reconstruction loss and weighted regularization terms.
         """
         x_hat, dpi, model_projection, decoder_hessian, encoder_hessian = dachtbae.forward(x)
         observed_projection, observed_normal_projection, drift, cov = targets
@@ -338,11 +408,37 @@ class DACHTBAELoss(CHAELoss, DACTBAELoss):
 
 
 class DiffusionLoss(nn.Module):
+    """
+        A custom loss function for training an AutoEncoderDiffusion model. This loss combines several components:
+        - Mean squared error (MSE) between the predicted covariance and the target covariance.
+        - MSE between the local covariance of the encoded space and the target encoded covariance.
+        - A tangent drift loss that penalizes deviations in the normal projection of the drift vector.
+
+        The total loss is a weighted sum of these components, allowing for control over the influence of the tangent drift loss.
+
+        Parameters:
+        -----------
+        tangent_drift_weight : float, optional (default=0.0)
+            Weight applied to the tangent drift loss component.
+        norm : str, optional (default="fro")
+            Norm type to be used in the MSE loss calculations. The norm is applied when computing the matrix MSE.
+
+        Attributes:
+        -----------
+        tangent_drift_weight : float
+            Weight applied to the tangent drift loss component.
+        cov_mse : MatrixMSELoss
+            MSE loss instance for comparing model and target covariances in the ambient space.
+        local_cov_mse : MatrixMSELoss
+            MSE loss instance for comparing local covariances in the encoded space.
+        tangent_drift_loss : function
+            Function used to calculate the tangent drift loss component.
+    """
     def __init__(self, tangent_drift_weight=0.0, norm="fro"):
         """
 
-        :param tangent_drift_weight:
-        :param norm:
+        :param tangent_drift_weight: weight for the tangent drift alignment penalty
+        :param norm: matrix norm for the covariance error
         """
         super().__init__()
         self.tangent_drift_weight = tangent_drift_weight
@@ -352,11 +448,22 @@ class DiffusionLoss(nn.Module):
 
     def forward(self, ae_diffusion: AutoEncoderDiffusion, x, targets):
         """
+        Computes the total loss for the AutoEncoderDiffusion model.
 
-        :param ae_diffusion:
-        :param x:
-        :param targets: (mu, cov, encoded_cov)
-        :return:
+        Parameters:
+        -----------
+        ae_diffusion : AutoEncoderDiffusion
+            The AutoEncoderDiffusion model whose output is being evaluated.
+        x : Tensor
+            Input tensor to the autoencoder.
+        targets : tuple of Tensors
+            A tuple containing the target ambient drift vector, target ambient covariance matrix,
+            and target encoded covariance matrix (mu, cov, encoded_cov).
+
+        Returns:
+        --------
+        total_loss : Tensor
+            The computed total loss combining covariance MSE, local covariance MSE, and weighted tangent drift loss.
         """
         model_cov, normal_proj, qv, bbt = ae_diffusion.forward(x)
         ambient_drift, ambient_cov, encoded_cov = targets
@@ -372,7 +479,22 @@ class DiffusionLoss(nn.Module):
 
 class DriftMSELoss(nn.Module):
     """
+    A custom loss function for training an AutoEncoderDrift model. This loss function combines:
+    - Mean squared error (MSE) between the model-predicted ambient drift and the observed ambient drift.
+    - MSE between the model-predicted latent drift and the true latent drift.
 
+    The loss is computed by first transforming the observed ambient drift into the latent space using the model's
+    decoder jacobian and neural metric tensor. This allows for a direct comparison between model predictions and targets
+    in both the ambient and latent spaces.
+
+    Parameters:
+    -----------
+    None. Inherits from nn.Module.
+
+    Methods:
+    --------
+    forward(drift_model: AutoEncoderDrift, x: Tensor, targets: Tuple[Tensor, Tensor]) -> Tensor
+        Computes the loss given the input data, the drift model, and the target drift and covariance.
     """
     def __init__(self, *args, **kwargs):
         """
@@ -386,11 +508,22 @@ class DriftMSELoss(nn.Module):
     def forward(drift_model: AutoEncoderDrift, x: Tensor,
                 targets: Tuple[Tensor, Tensor]) -> Tensor:
         """
+        Computes the loss for the AutoEncoderDrift model.
 
-        :param drift_model: AutoEncoderDrift
-        :param x: tensor
-        :param targets: tensor tuple of (mu, encoded_cov)
-        :return:
+        Parameters:
+        -----------
+        drift_model : AutoEncoderDrift
+            The AutoEncoderDrift model whose output is being evaluated.
+        x : Tensor
+            Input tensor to the autoencoder.
+        targets : tuple of Tensors
+            A tuple containing the observed ambient drift vector and the target encoded covariance matrix
+            (mu, encoded_cov).
+
+        Returns:
+        --------
+        loss : Tensor
+            The computed loss combining ambient drift error and latent drift error.
         """
         observed_ambient_drift, encoded_cov = targets
         z = drift_model.autoencoder.encoder(x)

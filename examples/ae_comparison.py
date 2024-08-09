@@ -1,3 +1,14 @@
+"""
+Run this BEFORE 'sde_comparison.py'.
+
+This script tests the performance of various autoencoder models (AE, CAE, CHAE, TBAE, CTBAE, DACTBAE)
+on a point cloud generated from a Riemannian manifold with specified surface and dynamics. It compares
+interpolation and extrapolation errors across models, calculates diffeomorphism errors, and generates a
+LaTeX table summarizing the results. The models are trained with different loss functions incorporating
+contractive, second-order, and tangent bundle regularizations, and their reconstruction performance is
+evaluated and visualized.
+
+"""
 # Experiment to test where contractive/tangent bundle AE beats vanilla AE
 import os
 import sympy as sp
@@ -12,8 +23,8 @@ from shillml.pointclouds import PointCloud, SDECoefficients, Surfaces
 from shillml.utils import process_data, fit_model
 
 # see shillml.point_clouds.surfaces and .dynamics for more options
-surface = "paraboloid"  # choices: paraboloid, quartic, sphere, torus, gaussian_bump, hyperboloid, etc
-dynamics = "langevin harmonic"  # choices: bm, rbm, langevin harmonic, langevin double well, arbitrary
+surface = "quartic"  # choices: paraboloid, quartic, sphere, torus, gaussian_bump, hyperboloid, etc
+dynamics = "arbitrary"  # choices: bm, rbm, langevin harmonic, langevin double well, arbitrary
 num_pts = 30
 batch_size = 5
 num_test = 100
@@ -30,7 +41,7 @@ tangent_bundle_weight = 0.001  # This is the weight for |P_model-P_true|_F^2
 tangent_drift_weight = 0.001  # This is the weight for the |N(mu-0.5 q)|_2^2 drift alignment on Stage 1
 tangent_bundle_norm = "fro"  # This for switching that above matrix norm in stage 1 above for the P's
 lr = 0.0001
-epochs = 20000
+epochs = 30000
 print_freq = 1000
 weight_decay = 0.
 # Network structure
@@ -68,7 +79,7 @@ dynamics_map = {
         manifold.local_bm_diffusion()
     ),
     "langevin double well": (
-        manifold.local_bm_drift() + 0.5 * manifold.metric_tensor().inv() * coefs.drift_double_well_potential(),
+        manifold.local_bm_drift() + 0.1 * manifold.metric_tensor().inv() * coefs.drift_double_well_potential(),
         manifold.local_bm_diffusion()
     ),
     "arbitrary": (
@@ -198,6 +209,7 @@ if __name__ == "__main__":
     # Create a detailed caption
     caption = f"Interpolation and Extrapolation Errors for Different Autoencoder Models. "
     caption += f"Surface: {surface}. "
+    caption += f"Local dynamics: {dynamics}"
     caption += f"Network dimensions: {extrinsic_dim} (extrinsic) to {intrinsic_dim} (intrinsic). "
     caption += f"Hidden layers: {h1}. "
     caption += f"Encoder activation: {encoder_act.__class__.__name__}. "
