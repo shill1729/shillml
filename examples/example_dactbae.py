@@ -134,7 +134,7 @@ if __name__ == "__main__":
     ax.quiver(x[:, 0], x[:, 1], x[:, 2], mu[:, 0], mu[:, 1], mu[:, 2], normalize=True, length=0.1)
     ax.quiver(x_hat[:, 0], x_hat[:, 1], x_hat[:, 2], mu_hat[:, 0], mu_hat[:, 1], mu_hat[:, 2], normalize=True,
               length=0.1, color="red")
-    ae.plot_surface(-1, 1, grid_size=30, ax=ax, title="CUCTBAE")
+    ae.plot_surface(-1, 1, grid_size=30, ax=ax, title="DACTBAE")
     plt.show()
 
     # Plot SDEs
@@ -157,5 +157,5 @@ if __name__ == "__main__":
                   alpha=0.8)
         ax.plot3D(model_ambient_paths[i, :, 0], model_ambient_paths[i, :, 1], model_ambient_paths[i, :, 2], c="blue",
                   alpha=0.8)
-    ae.plot_surface(-1, 1, grid_size=30, ax=ax, title="CUCTBAE")
+    ae.plot_surface(-1, 1, grid_size=30, ax=ax, title="DACTBAE")
     plt.show()
