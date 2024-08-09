@@ -7,7 +7,8 @@
 # from . import pdes
 # from . import pointclouds
 # shillml/__init__.py
-from . import *
+from .utils import fit_model, process_data, select_device, set_grad_tracking
+
 
 
 
