@@ -1,8 +1,7 @@
-from shillml.models.autoencoders.ae import AE
-import torch.nn as nn
 from typing import List, Tuple
 from torch import Tensor
-
+import torch.nn as nn
+from shillml.models.autoencoders.ae import AE
 
 class CAE(AE):
     def __init__(self,
@@ -48,13 +47,14 @@ class CAE(AE):
 
 
 if __name__ == "__main__":
+    import sympy as sp
+    import matplotlib.pyplot as plt
     from shillml.utils import fit_model
     from shillml.losses import CAELoss
-    import sympy as sp
     from shillml.diffgeo import RiemannianManifold
     from shillml.pointclouds import PointCloud
     from shillml.utils import process_data
-    import matplotlib.pyplot as plt
+
     # Generate data
     u, v = sp.symbols("u v", real=True)
     local_coordinates = sp.Matrix([u, v])

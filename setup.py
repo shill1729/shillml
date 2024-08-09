@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 
 def parse_requirements(filename):
@@ -8,8 +8,8 @@ def parse_requirements(filename):
 
 setup(
     name='shillml',
-    version='0.0.682',
-    packages=['shillml'],
+    version='0.0.683',
+    packages=find_packages(),
     url='https://github.com/shill1729/shillml',
     install_requires=parse_requirements("requirements.txt"),
     license='MIT',

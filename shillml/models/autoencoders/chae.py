@@ -52,9 +52,10 @@ class CHAE(AE):
 
 
 if __name__ == "__main__":
+    import sympy as sp
     from shillml.utils import fit_model
     from shillml.losses import CHAELoss
-    import sympy as sp
+
     from shillml.diffgeo import RiemannianManifold
     from shillml.pointclouds import PointCloud
     from shillml.utils import process_data

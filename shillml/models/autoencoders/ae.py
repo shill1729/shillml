@@ -1,13 +1,9 @@
 from typing import List
-
 import matplotlib.pyplot as plt
 from torch import Tensor
-
+import torch
 import torch.nn as nn
 import numpy as np
-
-import torch
-
 from shillml.models.ffnn import FeedForwardNeuralNet
 
 
@@ -212,9 +208,9 @@ class AE(nn.Module):
 
 
 if __name__ == "__main__":
+    import sympy as sp
     from shillml.utils import fit_model
     from shillml.losses import AELoss
-    import sympy as sp
     from shillml.diffgeo import RiemannianManifold
     from shillml.pointclouds import PointCloud
     from shillml.utils import process_data

@@ -1,8 +1,7 @@
-from shillml.models.autoencoders.ae import AE
-import torch.nn as nn
 from typing import List, Tuple
+import torch.nn as nn
 from torch import Tensor
-
+from shillml.models.autoencoders.ae import AE
 
 class DACHTBAE(AE):
     """
