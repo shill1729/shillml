@@ -70,7 +70,7 @@ class DACTBAE(AE):
 
 if __name__ == "__main__":
     from shillml.utils import fit_model
-    from shillml.losses import CUCTBAELoss
+    from shillml.losses import DACTBAELoss
     import sympy as sp
     from shillml.diffgeo import RiemannianManifold
     from shillml.pointclouds import PointCloud
@@ -91,7 +91,7 @@ if __name__ == "__main__":
     x, mu, cov, p, orthogcomp = process_data(x, mu, cov, d=2)
     # Define model
     ae = DACTBAE(3, 2, [64], nn.Tanh(), nn.Tanh())
-    ae_loss = CUCTBAELoss(contractive_weight=0.001, tangent_bundle_weight=0.01, tangent_drift_weight=0.01, norm="fro")
+    ae_loss = DACTBAELoss(contractive_weight=0.001, tangent_bundle_weight=0.01, tangent_drift_weight=0.01, norm="fro")
     fit_model(ae, ae_loss, x, targets=(p, orthogcomp, mu, cov), epochs=5000, batch_size=20)
     # Detach and plot
     x = x.detach()

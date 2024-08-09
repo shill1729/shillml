@@ -50,9 +50,9 @@ def metric_tensor(chart, x):
 def manifold_divergence(a: sp.Matrix, p: sp.Matrix, volume_measure):
     """
     Compute the manifold divergence of a matrix (row-wise) at a point given the volume measure
+    :param volume_measure:
     :param a:
     :param p:
-    :param detg:
     :return:
     """
 

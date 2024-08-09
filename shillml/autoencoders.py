@@ -125,6 +125,7 @@ class AutoEncoder(nn.Module):
         """
         Plot the surface produced by the neural-network chart.
 
+        :param title:
         :param a: the lb of the encoder range box [a,b]^d
         :param b: the ub of the encoder range box [a,b]^d
         :param grid_size: grid size for the mesh of the encoder range

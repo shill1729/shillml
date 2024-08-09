@@ -119,7 +119,6 @@ class PointCloud:
         Plot the point cloud with an option to show the drift vector field.
 
         :param points: The points to plot (if None, generates new points)
-        :param weights: The weights of the points (for sizing)
         :param drifts: The extrinsic drifts at each point
         :param plot_drift: Whether to plot the drift vector field
         :param drift_scale: Scaling factor for drift vectors

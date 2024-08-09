@@ -72,7 +72,7 @@ class DACHTBAE(AE):
 
 if __name__ == "__main__":
     from shillml.utils import fit_model
-    from shillml.losses import CUCHTBAELoss
+    from shillml.losses import DACHTBAELoss
     import sympy as sp
     from shillml.diffgeo import RiemannianManifold
     from shillml.pointclouds import PointCloud
@@ -93,7 +93,7 @@ if __name__ == "__main__":
     x, mu, cov, p, orthogcomp = process_data(x, mu, cov, d=2)
     # Define model
     ae = DACHTBAE(3, 2, [8], nn.Tanh(), nn.Tanh())
-    ae_loss = CUCHTBAELoss(contractive_weight=0.005, hessian_weight=0.00001, tangent_drift_weight=0.0001,
+    ae_loss = DACHTBAELoss(contractive_weight=0.005, hessian_weight=0.00001, tangent_drift_weight=0.0001,
                            tangent_bundle_weight=0.001)
     fit_model(ae, ae_loss, x, targets=(p, orthogcomp, mu, cov), epochs=5000, batch_size=20)
     # Detach and plot

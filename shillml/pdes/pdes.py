@@ -321,6 +321,7 @@ class Telegraph:
     def initial_condition(self, x, epsilon=0.001):
         """
 
+        :param epsilon:
         :param x:
         :return:
         """
