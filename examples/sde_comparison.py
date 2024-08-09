@@ -1,8 +1,6 @@
 # Load in the CCTBAE
 # Fit the SDEs
-import matplotlib.pyplot as plt
-import numpy as np
-from ae_comparison import *
+from examples.ae_comparison import *
 from shillml.models.nsdes import LatentNeuralSDE, AutoEncoderDrift, AutoEncoderDiffusion
 from shillml.losses import DiffusionLoss, DriftMSELoss, MatrixMSELoss, contractive_regularization, tangent_drift_loss
 from shillml.utils import set_grad_tracking, fit_model

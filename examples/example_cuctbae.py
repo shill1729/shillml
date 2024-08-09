@@ -1,16 +1,16 @@
-import torch
-import torch.nn as nn
-import sympy as sp
-import numpy as np
-import matplotlib.pyplot as plt
-from shillml.utils import fit_model, process_data, set_grad_tracking
-from shillml.losses import DACTBAELoss, DiffusionLoss, DriftMSELoss
-from shillml.diffgeo import RiemannianManifold
-from shillml.pointclouds import PointCloud
-from shillml.models.autoencoders import DACTBAE
-from shillml.models.nsdes import AutoEncoderDrift, AutoEncoderDiffusion, LatentNeuralSDE
-from shillml.pointclouds.dynamics import SDECoefficients
 if __name__ == "__main__":
+    import torch
+    import torch.nn as nn
+    import sympy as sp
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from shillml.utils import fit_model, process_data, set_grad_tracking
+    from shillml.losses import DACTBAELoss, DiffusionLoss, DriftMSELoss
+    from shillml.diffgeo import RiemannianManifold
+    from shillml.pointclouds import PointCloud
+    from shillml.models.autoencoders import DACTBAE
+    from shillml.models.nsdes import AutoEncoderDrift, AutoEncoderDiffusion, LatentNeuralSDE
+    from shillml.pointclouds.dynamics import SDECoefficients
     # Inputs
     train_seed = 17
     test_seed = None
