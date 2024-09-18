@@ -4,8 +4,8 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from shillml.models.autoencoders import AE, CAE, CHAE, TBAE, CTBAE, DACTBAE, DACHTBAE
-from shillml.models.nsdes import AutoEncoderDiffusion, AutoEncoderDrift
+from shillml.models.autoencoders import AutoEncoder, CAE, CHAE, TBAE, CTBAE, DACTBAE, DACHTBAE, NewAE
+from shillml.models.nsdes import AutoEncoderDiffusion, AutoEncoderDiffusion2, AutoEncoderDrift
 
 
 def contractive_regularization(encoder_jacobian: Tensor) -> Tensor:
@@ -84,7 +84,7 @@ class AELoss(nn.Module):
         super().__init__(*args, **kwargs)
         self.reconstruction_loss = nn.MSELoss()
 
-    def forward(self, ae: AE, x: Tensor, targets: Optional[Tensor] = None):
+    def forward(self, ae: AutoEncoder, x: Tensor, targets: Optional[Tensor] = None):
         """
 
         :param ae:
@@ -127,6 +127,7 @@ class CHAELoss(CAELoss):
     """
 
     """
+
     def __init__(self, contractive_weight=1., hessian_weight=1., *args, **kwargs):
         """
 
@@ -159,6 +160,7 @@ class TBAELoss(AELoss):
     """
 
     """
+
     def __init__(self,
                  tangent_bundle_weight=1.,
                  norm="fro",
@@ -194,6 +196,7 @@ class CTBAELoss(TBAELoss, CAELoss):
     """
 
     """
+
     def __init__(self,
                  tangent_bundle_weight=1.,
                  contractive_weight=1.,
@@ -244,6 +247,7 @@ class DACTBAELoss(CTBAELoss):
         tangent_drift_weight (float): Weight for the tangent drift loss component.
         tangent_drift_loss (callable): The function to compute the tangent drift loss.
     """
+
     def __init__(self,
                  contractive_weight=1.,
                  tangent_drift_weight=1.,
@@ -292,6 +296,88 @@ class DACTBAELoss(CTBAELoss):
         return total_loss
 
 
+class NewAELoss(CTBAELoss):
+    """
+    A custom loss function for an auto encoder with the following regularizations:
+    1. Contractive--minimizing the Frobenius norm of the encoder's Jacobian
+    2. Tangent Bundle regularization: minimizing the Frobenius error of the decoder's orthogonal projection against
+    and observed one
+    3. Ambient tangent drift alignment regularization: minimizes the square norm of the normal projected ambient
+    tangent drift mu-0.5 q, where $q$ is approximated with the observed covariance
+    4. Diffeomorphism regularization: the square Frobenius error of Dpi - g^{-1} Dphi^T
+
+    Attributes:
+        tangent_drift_weight (float): Weight for the tangent drift loss component.
+        tangent_drift_loss (callable): The function to compute the tangent drift loss.
+    """
+
+    def __init__(self,
+                 contractive_weight=1.,
+                 tangent_drift_weight=1.,
+                 tangent_bundle_weight=1.,
+                 diffeo_weight=1.,
+                 norm="fro",
+                 *args,
+                 **kwargs):
+        """
+
+        :param contractive_weight:
+        :param tangent_drift_weight:
+        :param tangent_bundle_weight:
+        :param diffeomorphism_weight:
+        :param norm:
+        :param args:
+        :param kwargs:
+        """
+        super().__init__(tangent_bundle_weight=tangent_bundle_weight,
+                         contractive_weight=contractive_weight,
+                         norm=norm, *args, **kwargs)
+        self.tangent_drift_weight = tangent_drift_weight
+        self.tangent_drift_loss = tangent_drift_loss
+        self.diffeo_weight = diffeo_weight
+
+    def forward(self, dactbae: NewAE, x: Tensor, targets: Optional[Union[Tensor, Tuple[Tensor, ...]]] = None):
+        """
+
+        :param dactbae:
+        :param x:
+        :param targets:
+        :return:
+        """
+        d = dactbae.intrinsic_dim
+        # Get model outputs and regularization inputs
+        x_hat, dpi, dphi, decoder_hessian = dactbae.forward(x)
+        # Extract targets
+        observed_projection, observed_normal_projection, drift, cov, orthonormal_frame = targets
+        # Compute g = Dphi^T Dphi
+        g = torch.bmm(dphi.mT, dphi)
+        # Compute g^-1 (you can use torch.linalg.inv for this)
+        g_inv = torch.linalg.inv(g)
+        model_projection = torch.bmm(torch.bmm(dphi, g_inv), dphi.mT)
+        bbt_proxy = torch.bmm(torch.bmm(dpi, cov), dpi.mT)
+        qv = torch.stack(
+            [torch.einsum("nii -> n", torch.bmm(bbt_proxy, decoder_hessian[:, i, :, :])) for i in
+             range(x.size(1))])
+        qv = qv.T
+        tangent_vector = drift - 0.5 * qv
+        # This is slow
+        # normal_proj_vector = torch.bmm(observed_normal_projection, tangent_vector.unsqueeze(2))
+        # This is faster
+        orthonormal_frame_times_td = torch.bmm(orthonormal_frame.mT, tangent_vector.unsqueeze(2))
+        normal_proj_vector = tangent_vector.unsqueeze(2)-torch.bmm(orthonormal_frame, orthonormal_frame_times_td)
+        normal_proj_vector = normal_proj_vector.squeeze(2)
+        # Losses
+        mse = self.reconstruction_loss(x_hat, x)
+        contractive_penalty = self.contractive_weight * self.contractive_reg(dpi)
+        tangent_bundle_error = self.tangent_bundle_weight * self.tangent_bundle_reg(model_projection,
+                                                                                    observed_projection)
+        tangent_drift_error = self.tangent_drift_weight * self.tangent_drift_loss(normal_proj_vector)
+        # Compute the Frobenius norm term: ||Dpi - g^-1 Dphi^T||_F^2
+        frobenius_term = self.diffeo_weight * torch.mean(torch.norm(dpi - torch.bmm(g_inv, dphi.mT), p='fro') ** 2)
+        total_loss = mse + contractive_penalty + tangent_bundle_error + tangent_drift_error + frobenius_term
+        return total_loss
+
+
 class DACHTBAELoss(CHAELoss, DACTBAELoss):
     """
         A combined loss function class for DACHTBAE models, inheriting from both `CHAELoss` and `DACTBAELoss`.
@@ -331,6 +417,7 @@ class DACHTBAELoss(CHAELoss, DACTBAELoss):
         tangent_drift_weight : float
             Weight for the tangent drift regularization.
     """
+
     def __init__(self,
                  contractive_weight=1.,
                  hessian_weight=1.,
@@ -434,6 +521,7 @@ class DiffusionLoss(nn.Module):
         tangent_drift_loss : function
             Function used to calculate the tangent drift loss component.
     """
+
     def __init__(self, tangent_drift_weight=0.0, norm="fro"):
         """
 
@@ -477,6 +565,86 @@ class DiffusionLoss(nn.Module):
         return total_loss
 
 
+class DiffusionLoss2(nn.Module):
+    """
+        A custom loss function for training an AutoEncoderDiffusion model. This loss combines several components:
+        - Mean squared error (MSE) between the predicted covariance and the target covariance.
+        - MSE between the local covariance of the encoded space and the target encoded covariance.
+        - A tangent drift loss that penalizes deviations in the normal projection of the drift vector.
+
+        The total loss is a weighted sum of these components, allowing for control over the influence of the tangent drift loss.
+
+        Parameters:
+        -----------
+        tangent_drift_weight : float, optional (default=0.0)
+            Weight applied to the tangent drift loss component.
+        norm : str, optional (default="fro")
+            Norm type to be used in the MSE loss calculations. The norm is applied when computing the matrix MSE.
+
+        Attributes:
+        -----------
+        tangent_drift_weight : float
+            Weight applied to the tangent drift loss component.
+        cov_mse : MatrixMSELoss
+            MSE loss instance for comparing model and target covariances in the ambient space.
+        local_cov_mse : MatrixMSELoss
+            MSE loss instance for comparing local covariances in the encoded space.
+        tangent_drift_loss : function
+            Function used to calculate the tangent drift loss component.
+    """
+
+    def __init__(self, tangent_drift_weight=0.0, norm="fro"):
+        """
+
+        :param tangent_drift_weight: weight for the tangent drift alignment penalty
+        :param norm: matrix norm for the covariance error
+        """
+        super().__init__()
+        self.tangent_drift_weight = tangent_drift_weight
+        self.cov_mse = MatrixMSELoss(norm=norm)
+        self.local_cov_mse = MatrixMSELoss(norm=norm)
+        self.tangent_drift_loss = tangent_drift_loss
+
+    def forward(self, ae_diffusion: AutoEncoderDiffusion2, x, targets):
+        """
+        Computes the total loss for the AutoEncoderDiffusion model.
+
+        Parameters:
+        -----------
+        ae_diffusion : AutoEncoderDiffusion
+            The AutoEncoderDiffusion model whose output is being evaluated.
+        x : Tensor
+            Input tensor to the autoencoder.
+        targets : tuple of Tensors
+            A tuple containing the target ambient drift vector, target ambient covariance matrix,
+            and target encoded covariance matrix (mu, cov, encoded_cov).
+
+        Returns:
+        --------
+        total_loss : Tensor
+            The computed total loss combining covariance MSE, local covariance MSE, and weighted tangent drift loss.
+        """
+        dphi, g_inv, normal_proj, qv, bbt = ae_diffusion.forward(x)
+        ambient_drift, ambient_cov, encoded_cov = targets
+        tangent_vector = ambient_drift - 0.5 * qv
+        # TODO make this faster with (td-HH^T td), td = mu-0.5 q
+        normal_proj_vector = torch.bmm(normal_proj, tangent_vector.unsqueeze(2))
+        # cov_mse = self.cov_mse(model_cov, ambient_cov)
+        # Add local cov mse
+        local_cov_mse = self.local_cov_mse(bbt, encoded_cov)
+        normal_bundle_loss = self.tangent_drift_loss(normal_proj_vector)
+        # New loss term:
+        # Compute Dphi^T Sigma Dphi
+        dphi_t_ambient_cov = torch.bmm(dphi.mT, torch.bmm(ambient_cov, dphi))
+        # Now compute g_inv Dphi^T Sigma Dphi g_inv
+        transformed_cov = torch.bmm(g_inv, torch.bmm(dphi_t_ambient_cov, g_inv))
+        # Frobenius norm term: ||X - g^-1 Dphi^T Sigma Dphi g^-1||_F^2
+        # where X is the local model covariance bbt
+        frobenius_term = torch.mean(torch.norm(bbt - transformed_cov, p='fro') ** 2)
+        total_loss = local_cov_mse + self.tangent_drift_weight * normal_bundle_loss + frobenius_term
+        return total_loss
+
+
 class DriftMSELoss(nn.Module):
     """
     A custom loss function for training an AutoEncoderDrift model. This loss function combines:
@@ -496,6 +664,7 @@ class DriftMSELoss(nn.Module):
     forward(drift_model: AutoEncoderDrift, x: Tensor, targets: Tuple[Tensor, Tensor]) -> Tensor
         Computes the loss given the input data, the drift model, and the target drift and covariance.
     """
+
     def __init__(self, *args, **kwargs):
         """
 
@@ -533,8 +702,71 @@ class DriftMSELoss(nn.Module):
         model_ambient_drift = drift_model(x)
         dphi = drift_model.autoencoder.decoder_jacobian(z)
         ginv = torch.linalg.inv(drift_model.autoencoder.neural_metric_tensor(z))
-        vec = observed_ambient_drift-0.5*q
+        vec = observed_ambient_drift - 0.5 * q
         true_latent_drift = torch.bmm(ginv, torch.bmm(dphi.mT, vec.unsqueeze(2))).squeeze()
-        ambient_error = torch.mean(torch.linalg.vector_norm(model_ambient_drift - observed_ambient_drift, ord=2, dim=1) ** 2)
+        ambient_error = torch.mean(
+            torch.linalg.vector_norm(model_ambient_drift - observed_ambient_drift, ord=2, dim=1) ** 2)
         latent_error = torch.mean(torch.linalg.vector_norm(latent_drift - true_latent_drift, ord=2, dim=1) ** 2)
-        return ambient_error+latent_error
+        return ambient_error + latent_error
+
+
+class DriftMSELoss2(nn.Module):
+    """
+    A custom loss function for training an AutoEncoderDrift model. This loss function combines:
+    - Mean squared error (MSE) between the model-predicted local drift and the observed local drift target.
+    - MSE between the model-predicted latent drift and the true latent drift.
+
+    The loss is computed by first transforming the observed ambient drift into the latent space using the model's
+    decoder jacobian and neural metric tensor. This allows for a direct comparison between model predictions and targets
+    in both the ambient and latent spaces.
+
+    Parameters:
+    -----------
+    None. Inherits from nn.Module.
+
+    Methods:
+    --------
+    forward(drift_model: AutoEncoderDrift, x: Tensor, targets: Tuple[Tensor, Tensor]) -> Tensor
+        Computes the loss given the input data, the drift model, and the target drift and covariance.
+    """
+
+    def __init__(self, *args, **kwargs):
+        """
+
+        :param args:
+        :param kwargs:
+        """
+        super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def forward(drift_model: AutoEncoderDrift, x: Tensor,
+                targets: Tuple[Tensor, Tensor]) -> Tensor:
+        """
+        Computes the loss for the AutoEncoderDrift model.
+
+        Parameters:
+        -----------
+        drift_model : AutoEncoderDrift
+            The AutoEncoderDrift model whose output is being evaluated.
+        x : Tensor
+            Input tensor to the autoencoder.
+        targets : tuple of Tensors
+            A tuple containing the observed ambient drift vector and the target encoded covariance matrix
+            (mu, encoded_cov).
+
+        Returns:
+        --------
+        loss : Tensor
+            The computed loss combining ambient drift error and latent drift error.
+        """
+        observed_ambient_drift, encoded_cov = targets
+        z = drift_model.autoencoder.encoder(x)
+        latent_drift = drift_model.latent_sde.drift_net(z)
+        decoder_hessian = drift_model.autoencoder.decoder_hessian(z)
+        q = drift_model.ambient_quadratic_variation_drift(encoded_cov, decoder_hessian)
+        dphi = drift_model.autoencoder.decoder_jacobian(z)
+        ginv = torch.linalg.inv(drift_model.autoencoder.neural_metric_tensor(z))
+        tangent_drift = observed_ambient_drift - 0.5 * q
+        true_latent_drift = torch.bmm(ginv, torch.bmm(dphi.mT, tangent_drift.unsqueeze(2))).squeeze()
+        latent_error = torch.mean(torch.linalg.vector_norm(latent_drift - true_latent_drift, ord=2, dim=1) ** 2)
+        return latent_error

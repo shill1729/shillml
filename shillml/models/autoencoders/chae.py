@@ -1,10 +1,10 @@
-from shillml.models.autoencoders.ae import AE
+from shillml.models.autoencoders.ae import AutoEncoder
 import torch.nn as nn
 from typing import List, Tuple
 from torch import Tensor
 
 
-class CHAE(AE):
+class CHAE(AutoEncoder):
     def __init__(self,
                  extrinsic_dim: int,
                  intrinsic_dim: int,

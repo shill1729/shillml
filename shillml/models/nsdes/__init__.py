@@ -1,1 +1,1 @@
-from .localnsde import LatentNeuralSDE, AutoEncoderDrift, AutoEncoderDiffusion
+from .localnsde import LatentNeuralSDE, AutoEncoderDrift, AutoEncoderDiffusion, AutoEncoderDiffusion2

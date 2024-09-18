@@ -1,13 +1,13 @@
 from typing import List, Tuple
 import torch.nn as nn
 from torch import Tensor
-from shillml.models.autoencoders.ae import AE
+from shillml.models.autoencoders.ae import AutoEncoder
 
 
 
 
 
-class TBAE(AE):
+class TBAE(AutoEncoder):
     """
         Tangent Bundle Autoencoder (TBAE) class that extends a standard autoencoder
         to incorporate tangent bundle regularization. This regularization helps in

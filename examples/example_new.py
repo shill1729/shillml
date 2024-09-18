@@ -13,12 +13,13 @@ if __name__ == "__main__":
     import numpy as np
     import matplotlib.pyplot as plt
     from shillml.utils import fit_model, process_data, set_grad_tracking
-    from shillml.losses import DACTBAELoss, DiffusionLoss, DriftMSELoss
+    from shillml.losses import NewAELoss, DiffusionLoss2, DriftMSELoss2
     from shillml.diffgeo import RiemannianManifold
     from shillml.pointclouds import PointCloud
-    from shillml.models.autoencoders import DACTBAE
-    from shillml.models.nsdes import AutoEncoderDrift, AutoEncoderDiffusion, LatentNeuralSDE
+    from shillml.models.autoencoders import NewAE
+    from shillml.models.nsdes import AutoEncoderDrift, AutoEncoderDiffusion2, LatentNeuralSDE
     from shillml.pointclouds.dynamics import SDECoefficients
+
     # Inputs
     train_seed = 17
     test_seed = None
@@ -26,9 +27,9 @@ if __name__ == "__main__":
     epsilon = 0.5
     bounds = [(-1.2, 1.2), (-1.2, 1.2)]
     large_bounds = [(-1 - epsilon, 1 + epsilon), (-1 - epsilon, 1 + epsilon)]
-    c1, c2 = 5, 5
+    c1, c2 = 10, 10
     num_points = 30
-    num_test = 200
+    num_test = 30
     input_dim, latent_dim = 3, 2
     hidden_layers = [64]
     sde_layers = [64]
@@ -37,8 +38,8 @@ if __name__ == "__main__":
     drift_act = nn.GELU()
     diffusion_act = nn.GELU()
     lr = 0.0001
-    epochs_ae = 20000
-    epochs_sde = 20000
+    epochs_ae = 10000
+    epochs_sde = 10000
     batch_size = num_points
     ntime = 5000
     npaths = 10
@@ -47,49 +48,53 @@ if __name__ == "__main__":
     encoder_hessian_weight = 0.
     tangent_drift_weight = 0.001
     tangent_bundle_weight = 0.001
+    diffeo_weight = 0.0001
 
     # Define the manifold
     u, v = sp.symbols("u v", real=True)
     local_coordinates = sp.Matrix([u, v])
-    chart = sp.Matrix([u, v, 0.8*sp.exp(-(u**2+v**2)/10)/10+0.2*sp.exp(-((u-0.5)**2+(v-0.5)**2)/15)/15])
+    chart = sp.Matrix(
+        [u, v, (u/c1)**2+(v/c2)**2])
     manifold = RiemannianManifold(local_coordinates, chart)
     coefs = SDECoefficients()
     # BM
-    local_drift = sp.Matrix([0, 0])
-    local_diffusion = sp.Matrix([[1, 0], [0, 1]])
+    # local_drift = sp.Matrix([0, 0])
+    # local_diffusion = sp.Matrix([[1, 0], [0, 1]])
     # RBM
     # local_drift = manifold.local_bm_drift()
     # local_diffusion = manifold.local_bm_diffusion()
     # # Langevin with double well potential
-    # local_drift = manifold.local_bm_drift() - 0.2*manifold.metric_tensor().inv() * sp.Matrix([4 * u * (u ** 2 - 1), 2 * v])
-    # local_diffusion = manifold.local_bm_diffusion()*coefs.diffusion_circular()
+    local_drift = manifold.local_bm_drift() - 0.2*manifold.metric_tensor().inv() * sp.Matrix([4 * u * (u ** 2 - 1), 2 * v])
+    local_diffusion = manifold.local_bm_diffusion()*coefs.diffusion_circular()
 
     # Generate the point cloud plus dynamics observations
     cloud = PointCloud(manifold, bounds, local_drift, local_diffusion)
-    x, _, mu, cov, _ = cloud.generate(num_points, seed=train_seed) # returns points, weights, drifts, cov, local coord
-    x, mu, cov, p, orthogcomp = process_data(x, mu, cov, d=2)
+    x, _, mu, cov, _ = cloud.generate(num_points, seed=train_seed)  # returns points, weights, drifts, cov, local coord
+    x, mu, cov, p, orthogcomp, orthonormal_frame = process_data(x, mu, cov, d=2, return_frame=True)
 
     # Define AE model
-    ae = DACTBAE(input_dim, latent_dim, hidden_layers, encoder_act, decoder_act)
-    ae_loss = DACTBAELoss(contractive_weight=contractive_weight,
-                          tangent_drift_weight=tangent_drift_weight,
-                          tangent_bundle_weight=tangent_bundle_weight)
-    fit_model(ae, ae_loss, x, targets=(p, orthogcomp, mu, cov), lr=lr, epochs=epochs_ae, batch_size=batch_size)
+    ae = NewAE(input_dim, latent_dim, hidden_layers, encoder_act, decoder_act)
+    ae_loss = NewAELoss(contractive_weight=contractive_weight,
+                        tangent_drift_weight=tangent_drift_weight,
+                        tangent_bundle_weight=tangent_bundle_weight,
+                        diffeo_weight=diffeo_weight
+                        )
+    fit_model(ae, ae_loss, x, targets=(p, orthogcomp, mu, cov, orthonormal_frame), lr=lr, epochs=epochs_ae, batch_size=batch_size)
     set_grad_tracking(ae, False)
 
     # Define diffusion model
-    latent_sde = LatentNeuralSDE(latent_dim, hidden_layers, hidden_layers, drift_act, diffusion_act, encoder_act)
+    latent_sde = LatentNeuralSDE(latent_dim, hidden_layers, hidden_layers, drift_act, diffusion_act, None)
 
     # Fit diffusion model
     model_drift = AutoEncoderDrift(latent_sde, ae)
-    model_diffusion = AutoEncoderDiffusion(latent_sde, ae)
+    model_diffusion = AutoEncoderDiffusion2(latent_sde, ae)
     dpi = ae.encoder.jacobian_network(x).detach()
     encoded_cov = torch.bmm(torch.bmm(dpi, cov), dpi.mT)
-    diffusion_loss = DiffusionLoss(tangent_drift_weight=tangent_drift_weight)
+    diffusion_loss = DiffusionLoss2(tangent_drift_weight=tangent_drift_weight)
     fit_model(model_diffusion, diffusion_loss, x, (mu, cov, encoded_cov), lr=lr, epochs=epochs_sde,
               batch_size=batch_size)
     set_grad_tracking(latent_sde.diffusion_net, False)
-    drift_loss = DriftMSELoss()
+    drift_loss = DriftMSELoss2()
     fit_model(model_drift, drift_loss, x, (mu, encoded_cov), epochs=epochs_sde, batch_size=batch_size)
 
     # Compute test loss
@@ -99,7 +104,7 @@ if __name__ == "__main__":
     encoded_cov = torch.bmm(torch.bmm(dpi, cov), dpi.mT)
     dl = diffusion_loss.forward(model_diffusion, x, (mu, cov, encoded_cov))
     drl = drift_loss(model_drift, x, (mu, encoded_cov))
-    aeloss = ae_loss.forward(ae, x, (p, orthogcomp, mu, cov))
+    aeloss = ae_loss.forward(ae, x, (p, orthogcomp, mu, cov, orthonormal_frame))
 
     # Calculate error
     z = ae.encoder(x)
@@ -111,18 +116,19 @@ if __name__ == "__main__":
     q_term_error = torch.mean(torch.linalg.vector_norm(q_true - q_model, ord=2, dim=1) ** 2)
     # Tangent drift error
     tangent_drift_true = torch.tensor(cloud.observed_tangent_drift, dtype=torch.float).squeeze()
-    tangent_drift_model = model_drift.forward(x)-0.5*q_model
-    tangent_drift_error = torch.mean(torch.linalg.vector_norm(tangent_drift_model - tangent_drift_true, ord=2, dim=1) ** 2)
+    tangent_drift_model = model_drift.forward(x) - 0.5 * q_model
+    tangent_drift_error = torch.mean(
+        torch.linalg.vector_norm(tangent_drift_model - tangent_drift_true, ord=2, dim=1) ** 2)
     # error_bound
-    error_bound = q_term_error+tangent_drift_error
+    error_bound = q_term_error + tangent_drift_error
 
     # Print results
     print("AE extrapolation loss = " + str(aeloss.detach().numpy()))
     print("Drift extrapolation loss = " + str(drl.detach().numpy()))
     print("Diffusion extrapolation loss = " + str(dl.detach().numpy()))
     print("q terms error = " + str(q_term_error.detach().numpy()))
-    print("Tangent drift error "+str(tangent_drift_error.detach().numpy()))
-    print("Sum = "+str(error_bound.detach().numpy()))
+    print("Tangent drift error " + str(tangent_drift_error.detach().numpy()))
+    print("Sum = " + str(error_bound.detach().numpy()))
 
     # Visualization
     x_hat = ae.decoder(ae.encoder(x)).detach()

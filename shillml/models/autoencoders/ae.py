@@ -1,13 +1,15 @@
 from typing import List
-import matplotlib.pyplot as plt
 from torch import Tensor
-import torch
+
+import matplotlib.pyplot as plt
 import torch.nn as nn
 import numpy as np
+import torch
+
 from shillml.models.ffnn import FeedForwardNeuralNet
 
 
-class AE(nn.Module):
+class AutoEncoder(nn.Module):
     def __init__(self,
                  extrinsic_dim: int,
                  intrinsic_dim: int,
@@ -32,13 +34,16 @@ class AE(nn.Module):
         super().__init__(*args, **kwargs)
         self.intrinsic_dim = intrinsic_dim
         self.extrinsic_dim = extrinsic_dim
-        # Encoder and decoder architecture
+        # Encoder and decoder architecture:
         encoder_neurons = [extrinsic_dim] + hidden_dims + [intrinsic_dim]
+        # The decoder's layer structure is the reverse of the encoder
         decoder_neurons = encoder_neurons[::-1]
         encoder_acts = [encoder_act] * (len(hidden_dims) + 1)
+        # The decoder has no final activation, so it can target anything in the ambient space
         decoder_acts = [decoder_act] * len(hidden_dims) + [None]
         self.encoder = FeedForwardNeuralNet(encoder_neurons, encoder_acts)
         self.decoder = FeedForwardNeuralNet(decoder_neurons, decoder_acts)
+        # Tie the weights of the decoder to be the transpose of the encoder, in reverse due
         self.decoder.tie_weights(self.encoder)
 
     def forward(self, x: Tensor) -> Tensor:
@@ -228,7 +233,7 @@ if __name__ == "__main__":
     x, _, mu, cov, _ = cloud.generate(30)
     x, mu, cov, p, orthogcomp = process_data(x, mu, cov, d=2)
     # Define model
-    ae = AE(3, 2, [64], nn.Tanh(), nn.Tanh())
+    ae = AutoEncoder(3, 2, [64], nn.Tanh(), nn.Tanh())
     ae_loss = AELoss()
     # Fit the model
     fit_model(ae, ae_loss, x, epochs=5000, batch_size=10)

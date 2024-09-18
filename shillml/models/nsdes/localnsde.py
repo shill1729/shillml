@@ -6,7 +6,7 @@ from torch import Tensor
 
 
 from shillml.models.ffnn import FeedForwardNeuralNet
-from shillml.models.autoencoders import AE
+from shillml.models.autoencoders import AutoEncoder
 from shillml.sdes.sdes import SDE
 
 
@@ -78,7 +78,7 @@ class LatentNeuralSDE(nn.Module):
 class AutoEncoderDiffusionGeometry(nn.Module):
     def __init__(self,
                  latent_sde: LatentNeuralSDE,
-                 ae: AE,
+                 ae: AutoEncoder,
                  *args,
                  **kwargs):
         """
@@ -108,6 +108,8 @@ class AutoEncoderDiffusionGeometry(nn.Module):
         return lifted_ensemble
 
     def ambient_quadratic_variation_drift(self, latent_covariance: Tensor, decoder_hessian: Tensor) -> Tensor:
+        # TODO Let's refactor this by flattening out bb^T and flattening out Hessian (phi)
+        #  So that Trace(bb^T Hessian Phi) can be computed as a vector dot product
         qv = torch.stack(
             [torch.einsum("nii -> n", torch.bmm(latent_covariance, decoder_hessian[:, i, :, :])) for i in
              range(self.extrinsic_dim)])
@@ -126,7 +128,7 @@ class AutoEncoderDiffusionGeometry(nn.Module):
 
 class AutoEncoderDiffusion(AutoEncoderDiffusionGeometry):
 
-    def __init__(self, latent_sde: LatentNeuralSDE, ae: AE, *args, **kwargs):
+    def __init__(self, latent_sde: LatentNeuralSDE, ae: AutoEncoder, *args, **kwargs):
         super().__init__(latent_sde, ae, *args, **kwargs)
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
@@ -144,9 +146,26 @@ class AutoEncoderDiffusion(AutoEncoderDiffusionGeometry):
         return cov_model, N, q, bbt
 
 
+class AutoEncoderDiffusion2(AutoEncoderDiffusionGeometry):
+
+    def __init__(self, latent_sde: LatentNeuralSDE, ae: AutoEncoder, *args, **kwargs):
+        super().__init__(latent_sde, ae, *args, **kwargs)
+
+    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        z, dphi, b, q = self.compute_sde_manifold_tensors(x)
+        bbt = torch.bmm(b, b.mT)
+        # Normal Bundle Penalty
+        g = torch.bmm(dphi.mT, dphi)
+        g_inv = torch.linalg.inv(g)
+        P = torch.bmm(torch.bmm(dphi, g_inv), dphi.mT)
+        N = torch.eye(self.extrinsic_dim).expand(x.shape[0], self.extrinsic_dim, self.extrinsic_dim) - P
+        # Exact normal term
+        return dphi, g_inv, N, q, bbt
+
+
 class AutoEncoderDrift(AutoEncoderDiffusionGeometry):
 
-    def __init__(self, latent_sde: LatentNeuralSDE, ae: AE, *args, **kwargs):
+    def __init__(self, latent_sde: LatentNeuralSDE, ae: AutoEncoder, *args, **kwargs):
         super().__init__(latent_sde, ae, *args, **kwargs)
 
     def forward(self, x: Tensor) -> Tensor:

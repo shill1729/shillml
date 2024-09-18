@@ -14,7 +14,7 @@ from torch import nn, Tensor
 from torch.utils.data import DataLoader, TensorDataset
 
 
-def process_data(x, mu, cov, d):
+def process_data(x, mu, cov, d, return_frame=False):
     x = torch.tensor(x, dtype=torch.float32)
     mu = torch.tensor(mu, dtype=torch.float32)
     cov = torch.tensor(cov, dtype=torch.float32)
@@ -23,7 +23,10 @@ def process_data(x, mu, cov, d):
     observed_projection = torch.bmm(orthonormal_frame, orthonormal_frame.mT)
     n, D, _ = observed_projection.size()
     observed_normal_projection = torch.eye(D).expand(n, D, D) - observed_projection
-    return x, mu, cov, observed_projection, observed_normal_projection
+    if return_frame:
+        return x, mu, cov, observed_projection, observed_normal_projection, orthonormal_frame
+    else:
+        return x, mu, cov, observed_projection, observed_normal_projection
 
 
 def fit_model(model: nn.Module,

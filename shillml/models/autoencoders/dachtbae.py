@@ -1,9 +1,9 @@
 from typing import List, Tuple
 import torch.nn as nn
 from torch import Tensor
-from shillml.models.autoencoders.ae import AE
+from shillml.models.autoencoders.ae import AutoEncoder
 
-class DACHTBAE(AE):
+class DACHTBAE(AutoEncoder):
     """
         Curvature Contractive Hessian Tangent Bundle Autoencoder (CUCHTBAE) class that extends a standard autoencoder
         to incorporate curvature regularization given an observed drift vector field and

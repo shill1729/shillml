@@ -1,9 +1,9 @@
 from typing import List, Tuple
 from torch import Tensor
 import torch.nn as nn
-from shillml.models.autoencoders.ae import AE
+from shillml.models.autoencoders.ae import AutoEncoder
 
-class CAE(AE):
+class CAE(AutoEncoder):
     def __init__(self,
                  extrinsic_dim: int,
                  intrinsic_dim: int,

@@ -227,9 +227,9 @@ if __name__ == "__main__":
 
     # Choose which SDE to run
     device = "cpu"
-    sde_choice = "OU"  # Options: "OU", "GBM", "CIR", "circle", "sphere", "chaos"
-    x00 = [1.5]
-    noise_dim = 1
+    sde_choice = "sphere"  # Options: "OU", "GBM", "CIR", "circle", "sphere", "chaos"
+    x00 = [1, 0, 0]
+    noise_dim = 3
     x0 = torch.tensor(x00, dtype=torch.float32)
     x0np = np.array(x00)
     tn = 1.
