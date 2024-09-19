@@ -11,6 +11,7 @@ if __name__ == "__main__":
     import torch.nn as nn
     import sympy as sp
     import numpy as np
+    import seaborn as sns
     import matplotlib.pyplot as plt
     from shillml.utils import fit_model, process_data, set_grad_tracking
     from shillml.losses import NewAELoss, DiffusionLoss2, DriftMSELoss2
@@ -18,6 +19,7 @@ if __name__ == "__main__":
     from shillml.pointclouds import PointCloud
     from shillml.models.autoencoders import NewAE
     from shillml.models.nsdes import AutoEncoderDrift, AutoEncoderDiffusion2, LatentNeuralSDE
+    from shillml.models.nsdes import ambient_quadratic_variation_drift
     from shillml.pointclouds.dynamics import SDECoefficients
 
     # Inputs
@@ -27,7 +29,7 @@ if __name__ == "__main__":
     epsilon = 0.5
     bounds = [(-1.2, 1.2), (-1.2, 1.2)]
     large_bounds = [(-1 - epsilon, 1 + epsilon), (-1 - epsilon, 1 + epsilon)]
-    c1, c2 = 10, 10
+    c1, c2 = 5, 9
     num_points = 30
     num_test = 30
     input_dim, latent_dim = 3, 2
@@ -38,14 +40,14 @@ if __name__ == "__main__":
     drift_act = nn.GELU()
     diffusion_act = nn.GELU()
     lr = 0.0001
-    epochs_ae = 10000
-    epochs_sde = 10000
+    epochs_ae = 30000
+    epochs_diffusion = 40000
+    epochs_drift = 15000
     batch_size = num_points
-    ntime = 5000
-    npaths = 10
+    ntime = 8000
+    npaths = 30
     tn = 1.
-    contractive_weight = 0.001
-    encoder_hessian_weight = 0.
+    contractive_weight = 0.000001
     tangent_drift_weight = 0.001
     tangent_bundle_weight = 0.001
     diffeo_weight = 0.0001
@@ -91,18 +93,27 @@ if __name__ == "__main__":
     dpi = ae.encoder.jacobian_network(x).detach()
     encoded_cov = torch.bmm(torch.bmm(dpi, cov), dpi.mT)
     diffusion_loss = DiffusionLoss2(tangent_drift_weight=tangent_drift_weight)
-    fit_model(model_diffusion, diffusion_loss, x, (mu, cov, encoded_cov), lr=lr, epochs=epochs_sde,
+    fit_model(model_diffusion,
+              diffusion_loss,
+              x,
+              targets=(mu, cov, encoded_cov, orthonormal_frame),
+              lr=lr, epochs=epochs_diffusion,
               batch_size=batch_size)
     set_grad_tracking(latent_sde.diffusion_net, False)
     drift_loss = DriftMSELoss2()
-    fit_model(model_drift, drift_loss, x, (mu, encoded_cov), epochs=epochs_sde, batch_size=batch_size)
+    fit_model(model_drift,
+              drift_loss,
+              x,
+              targets=(mu, encoded_cov),
+              epochs=epochs_drift,
+              batch_size=batch_size)
 
     # Compute test loss
     x, _, mu, cov, _, = cloud.generate(num_test, seed=test_seed)
     x, mu, cov, p, orthogcomp = process_data(x, mu, cov, d=2)
     dpi = ae.encoder.jacobian_network(x).detach()
     encoded_cov = torch.bmm(torch.bmm(dpi, cov), dpi.mT)
-    dl = diffusion_loss.forward(model_diffusion, x, (mu, cov, encoded_cov))
+    dl = diffusion_loss.forward(model_diffusion, x, (mu, cov, encoded_cov, orthonormal_frame))
     drl = drift_loss(model_drift, x, (mu, encoded_cov))
     aeloss = ae_loss.forward(ae, x, (p, orthogcomp, mu, cov, orthonormal_frame))
 
@@ -111,7 +122,7 @@ if __name__ == "__main__":
     latent_diff = model_diffusion.latent_sde.diffusion(z)
     bbt = torch.bmm(latent_diff, latent_diff.mT)
     decoder_hess = ae.decoder_hessian(z)
-    q_model = model_diffusion.ambient_quadratic_variation_drift(bbt, decoder_hess)
+    q_model = ambient_quadratic_variation_drift(bbt, decoder_hess)
     q_true = torch.tensor(cloud.observed_q, dtype=torch.float32).squeeze()
     q_term_error = torch.mean(torch.linalg.vector_norm(q_true - q_model, ord=2, dim=1) ** 2)
     # Tangent drift error
@@ -140,7 +151,7 @@ if __name__ == "__main__":
     ax.quiver(x[:, 0], x[:, 1], x[:, 2], mu[:, 0], mu[:, 1], mu[:, 2], normalize=True, length=0.1)
     ax.quiver(x_hat[:, 0], x_hat[:, 1], x_hat[:, 2], mu_hat[:, 0], mu_hat[:, 1], mu_hat[:, 2], normalize=True,
               length=0.1, color="red")
-    ae.plot_surface(-1, 1, grid_size=30, ax=ax, title="DACTBAE")
+    ae.plot_surface(-1, 1, grid_size=30, ax=ax, title="New Model")
     plt.show()
 
     # Plot SDEs
@@ -163,5 +174,24 @@ if __name__ == "__main__":
                   alpha=0.8)
         ax.plot3D(model_ambient_paths[i, :, 0], model_ambient_paths[i, :, 1], model_ambient_paths[i, :, 2], c="blue",
                   alpha=0.8)
-    ae.plot_surface(-1, 1, grid_size=30, ax=ax, title="DACTBAE")
+    ae.plot_surface(-1, 1, grid_size=30, ax=ax, title="New Model")
     plt.show()
+
+    # Plot densities of first coordinate of terminal:
+    # Extract the first coordinate at the terminal time for all paths
+    for i in range(ae.extrinsic_dim):
+        true_first_coord_terminal = true_ambient_paths[:, -1, i]
+        model_first_coord_terminal = model_ambient_paths[:, -1, i]
+
+        # Plot the KDEs
+        plt.figure(figsize=(10, 6))
+        sns.kdeplot(true_first_coord_terminal, label='True', color='black', fill=True)
+        sns.kdeplot(model_first_coord_terminal, label='Model', color='blue', fill=True)
+
+        # Customize the plot
+        plt.title('KDEs of the '+str(i)+'-th Coordinate at Terminal Time')
+        plt.xlabel('First Coordinate at Terminal Time')
+        plt.ylabel('Density')
+        plt.legend()
+        plt.grid(True)
+        plt.show()

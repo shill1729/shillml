@@ -1,8 +1,8 @@
 """
 Run this AFTER 'ae_comparison.py'.
 
-This script loads a trained DACTBAE model, freezes its parameters, and fits two Stochastic Differential
-Equation (SDE) models—a drift SDE and a diffusion SDE—using the latent space of the autoencoder. The script
+This script loads a trained DACTBAE model, freezes its parameters, and fits two coefficients for Stochastic Differential
+Equation (SDE) model—a drift NN and a diffusion NN—using the latent space of the autoencoder. The script
 computes various losses related to reconstruction, tangent bundle alignment, contraction, and SDE consistency
 for both interpolation and extrapolation tests. Results are summarized in a LaTeX table, and the model's
 performance is visualized by plotting the learned drift against the true drift in 3D.

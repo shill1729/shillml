@@ -106,7 +106,7 @@ if __name__ == "__main__":
     latent_diff = model_diffusion.latent_sde.diffusion(z)
     bbt = torch.bmm(latent_diff, latent_diff.mT)
     decoder_hess = ae.decoder_hessian(z)
-    q_model = model_diffusion.ambient_quadratic_variation_drift(bbt, decoder_hess)
+    q_model = ambient_quadratic_variation_drift(bbt, decoder_hess)
     q_true = torch.tensor(cloud.observed_q, dtype=torch.float32).squeeze()
     q_term_error = torch.mean(torch.linalg.vector_norm(q_true - q_model, ord=2, dim=1) ** 2)
     # Tangent drift error

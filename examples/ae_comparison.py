@@ -17,7 +17,7 @@ import torch.nn as nn
 import torch
 
 from shillml.diffgeo import RiemannianManifold
-from shillml.models.autoencoders import AE, CAE, CHAE, TBAE, CTBAE, DACTBAE
+from shillml.models.autoencoders import AutoEncoder, CAE, CHAE, TBAE, CTBAE, DACTBAE
 from shillml.losses import AELoss, CAELoss, CHAELoss, TBAELoss, CTBAELoss, DACTBAELoss
 from shillml.pointclouds import PointCloud, SDECoefficients, Surfaces
 from shillml.utils import process_data, fit_model

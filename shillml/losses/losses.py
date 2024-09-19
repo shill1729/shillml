@@ -6,6 +6,7 @@ from torch import Tensor
 
 from shillml.models.autoencoders import AutoEncoder, CAE, CHAE, TBAE, CTBAE, DACTBAE, DACHTBAE, NewAE
 from shillml.models.nsdes import AutoEncoderDiffusion, AutoEncoderDiffusion2, AutoEncoderDrift
+from shillml.models.nsdes import ambient_quadratic_variation_drift
 
 
 def contractive_regularization(encoder_jacobian: Tensor) -> Tensor:
@@ -281,10 +282,7 @@ class DACTBAELoss(CTBAELoss):
         x_hat, dpi, model_projection, decoder_hessian = dactbae.forward(x)
         observed_projection, observed_normal_projection, drift, cov = targets
         bbt_proxy = torch.bmm(torch.bmm(dpi, cov), dpi.mT)
-        qv = torch.stack(
-            [torch.einsum("nii -> n", torch.bmm(bbt_proxy, decoder_hessian[:, i, :, :])) for i in
-             range(x.size(1))])
-        qv = qv.T
+        qv = ambient_quadratic_variation_drift(bbt_proxy, decoder_hessian)
         tangent_vector = drift - 0.5 * qv
         normal_proj_vector = torch.bmm(observed_normal_projection, tangent_vector.unsqueeze(2))
         mse = self.reconstruction_loss(x_hat, x)
@@ -355,16 +353,13 @@ class NewAELoss(CTBAELoss):
         g_inv = torch.linalg.inv(g)
         model_projection = torch.bmm(torch.bmm(dphi, g_inv), dphi.mT)
         bbt_proxy = torch.bmm(torch.bmm(dpi, cov), dpi.mT)
-        qv = torch.stack(
-            [torch.einsum("nii -> n", torch.bmm(bbt_proxy, decoder_hessian[:, i, :, :])) for i in
-             range(x.size(1))])
-        qv = qv.T
+        qv = ambient_quadratic_variation_drift(bbt_proxy, decoder_hessian)
         tangent_vector = drift - 0.5 * qv
         # This is slow
         # normal_proj_vector = torch.bmm(observed_normal_projection, tangent_vector.unsqueeze(2))
         # This is faster
         orthonormal_frame_times_td = torch.bmm(orthonormal_frame.mT, tangent_vector.unsqueeze(2))
-        normal_proj_vector = tangent_vector.unsqueeze(2)-torch.bmm(orthonormal_frame, orthonormal_frame_times_td)
+        normal_proj_vector = tangent_vector.unsqueeze(2) - torch.bmm(orthonormal_frame, orthonormal_frame_times_td)
         normal_proj_vector = normal_proj_vector.squeeze(2)
         # Losses
         mse = self.reconstruction_loss(x_hat, x)
@@ -479,10 +474,7 @@ class DACHTBAELoss(CHAELoss, DACTBAELoss):
         x_hat, dpi, model_projection, decoder_hessian, encoder_hessian = dachtbae.forward(x)
         observed_projection, observed_normal_projection, drift, cov = targets
         bbt_proxy = torch.bmm(torch.bmm(dpi, cov), dpi.mT)
-        qv = torch.stack(
-            [torch.einsum("nii -> n", torch.bmm(bbt_proxy, decoder_hessian[:, i, :, :])) for i in
-             range(x.size(1))])
-        qv = qv.T
+        qv = ambient_quadratic_variation_drift(bbt_proxy, decoder_hessian)
         tangent_vector = drift - 0.5 * qv
         normal_proj_vector = torch.bmm(observed_normal_projection, tangent_vector.unsqueeze(2))
         mse = self.reconstruction_loss(x_hat, x)
@@ -625,10 +617,12 @@ class DiffusionLoss2(nn.Module):
             The computed total loss combining covariance MSE, local covariance MSE, and weighted tangent drift loss.
         """
         dphi, g_inv, normal_proj, qv, bbt = ae_diffusion.forward(x)
-        ambient_drift, ambient_cov, encoded_cov = targets
+        ambient_drift, ambient_cov, encoded_cov, orthonormal_frame = targets
         tangent_vector = ambient_drift - 0.5 * qv
-        # TODO make this faster with (td-HH^T td), td = mu-0.5 q
-        normal_proj_vector = torch.bmm(normal_proj, tangent_vector.unsqueeze(2))
+        orthonormal_frame_times_td = torch.bmm(orthonormal_frame.mT, tangent_vector.unsqueeze(2))
+        normal_proj_vector = tangent_vector.unsqueeze(2) - torch.bmm(orthonormal_frame, orthonormal_frame_times_td)
+        normal_proj_vector = normal_proj_vector.squeeze(2)
+
         # cov_mse = self.cov_mse(model_cov, ambient_cov)
         # Add local cov mse
         local_cov_mse = self.local_cov_mse(bbt, encoded_cov)
@@ -763,7 +757,7 @@ class DriftMSELoss2(nn.Module):
         z = drift_model.autoencoder.encoder(x)
         latent_drift = drift_model.latent_sde.drift_net(z)
         decoder_hessian = drift_model.autoencoder.decoder_hessian(z)
-        q = drift_model.ambient_quadratic_variation_drift(encoded_cov, decoder_hessian)
+        q = ambient_quadratic_variation_drift(encoded_cov, decoder_hessian)
         dphi = drift_model.autoencoder.decoder_jacobian(z)
         ginv = torch.linalg.inv(drift_model.autoencoder.neural_metric_tensor(z))
         tangent_drift = observed_ambient_drift - 0.5 * q

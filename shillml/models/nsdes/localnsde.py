@@ -75,6 +75,11 @@ class LatentNeuralSDE(nn.Module):
         return latent_ensemble
 
 
+def ambient_quadratic_variation_drift(latent_covariance: Tensor, decoder_hessian: Tensor) -> Tensor:
+    qv = torch.einsum("njk,nrkj->nr", latent_covariance, decoder_hessian)
+    return qv
+
+
 class AutoEncoderDiffusionGeometry(nn.Module):
     def __init__(self,
                  latent_sde: LatentNeuralSDE,
@@ -107,22 +112,13 @@ class AutoEncoderDiffusionGeometry(nn.Module):
                                     for path in latent_ensemble])
         return lifted_ensemble
 
-    def ambient_quadratic_variation_drift(self, latent_covariance: Tensor, decoder_hessian: Tensor) -> Tensor:
-        # TODO Let's refactor this by flattening out bb^T and flattening out Hessian (phi)
-        #  So that Trace(bb^T Hessian Phi) can be computed as a vector dot product
-        qv = torch.stack(
-            [torch.einsum("nii -> n", torch.bmm(latent_covariance, decoder_hessian[:, i, :, :])) for i in
-             range(self.extrinsic_dim)])
-        qv = qv.T
-        return qv
-
     def compute_sde_manifold_tensors(self, x: Tensor):
         z = self.autoencoder.encoder(x)
         dphi = self.autoencoder.decoder_jacobian(z)
         latent_diffusion = self.latent_sde.diffusion(z)
         latent_covariance = torch.bmm(latent_diffusion, latent_diffusion.mT)
         hessian = self.autoencoder.decoder_hessian(z)
-        q = self.ambient_quadratic_variation_drift(latent_covariance, hessian)
+        q = ambient_quadratic_variation_drift(latent_covariance, hessian)
         return z, dphi, latent_diffusion, q
 
 
