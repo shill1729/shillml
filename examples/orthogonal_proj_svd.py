@@ -1,4 +1,11 @@
+"""
+    This modules verifies numerically whether SVD can recover the orthogonal projection matrix P
+    from an observed covariance matrix Sigma which is implicitly assumed to be of the form
+    Dphi bb^T Dphi^T.
 
+    Assertion statements are made to check equality between P_true and P_svd and also check that they
+    are idempotent.
+"""
 
 if __name__ == "__main__":
     import torch
@@ -63,12 +70,12 @@ if __name__ == "__main__":
     assert torch.allclose(p_true, p_svd_estimate, atol=1e-5), "Projection matrices are not equal"
 
     # Check if P^2 = P for the true orthogonal projection (idempotency check)
-    p_true_squared = torch.mm(p_true[0], p_true[0])
-    assert torch.allclose(p_true[0], p_true_squared, atol=1e-5), "True orthogonal projection does not satisfy P^2 = P!"
+    p_true_squared = torch.bmm(p_true, p_true)
+    assert torch.allclose(p_true, p_true_squared, atol=1e-5), "True orthogonal projection does not satisfy P^2 = P!"
 
     # Check if P^2 = P for the SVD estimated projection (idempotency check)
-    p_svd_squared = torch.mm(p_svd_estimate[0], p_svd_estimate[0])
-    assert torch.allclose(p_svd_estimate[0], p_svd_squared,
+    p_svd_squared = torch.bmm(p_svd_estimate, p_svd_estimate)
+    assert torch.allclose(p_svd_estimate, p_svd_squared,
                           atol=1e-5), "SVD estimated projection does not satisfy P^2 = P!"
 
     # Print the first row of each matrix for visual inspection
