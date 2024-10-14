@@ -24,9 +24,9 @@ from shillml.utils import process_data, fit_model
 
 # see shillml.point_clouds.surfaces and .dynamics for more options
 surface = "quartic"  # choices: paraboloid, quartic, sphere, torus, gaussian_bump, hyperboloid, etc
-dynamics = "arbitrary"  # choices: bm, rbm, langevin harmonic, langevin double well, arbitrary
+dynamics = "rbm"  # choices: bm, rbm, langevin harmonic, langevin double well, arbitrary
 num_pts = 30
-batch_size = 5
+batch_size = 30
 num_test = 100
 seed = 17
 bd_epsilon = 0.5
@@ -35,15 +35,15 @@ bd_epsilon = 0.5
 alpha = -1
 beta = 1
 # Regularization: contract and tangent
-contractive_weight = 0.0001
-second_order_weight = 0.0001
+contractive_weight = 0.001
+second_order_weight = 0.00001
 tangent_bundle_weight = 0.001  # This is the weight for |P_model-P_true|_F^2
 tangent_drift_weight = 0.001  # This is the weight for the |N(mu-0.5 q)|_2^2 drift alignment on Stage 1
 tangent_bundle_norm = "fro"  # This for switching that above matrix norm in stage 1 above for the P's
 lr = 0.0001
-epochs = 30000
+epochs = 20000
 print_freq = 1000
-weight_decay = 0.
+weight_decay = 0.001
 # Network structure
 extrinsic_dim = 3
 intrinsic_dim = 2
@@ -106,12 +106,12 @@ x_extrap, _, mu_extrap, cov_extrap, _ = point_cloud.generate(n=num_test, seed=No
 x_extrap, mu_extrap, cov_extrap, P_extrap, N_extrap = process_data(x_extrap, mu_extrap, cov_extrap, d=intrinsic_dim)
 
 # Define models
-ae = AE(extrinsic_dim, intrinsic_dim, h1, encoder_act, decoder_act)
+ae = AutoEncoder(extrinsic_dim, intrinsic_dim, h1, encoder_act, decoder_act)
 cae = CAE(extrinsic_dim, intrinsic_dim, h1, encoder_act, decoder_act)
 c2ae = CHAE(extrinsic_dim, intrinsic_dim, h1, encoder_act, decoder_act)
 tbae = TBAE(extrinsic_dim, intrinsic_dim, h1, encoder_act, decoder_act)
 ctbae = CTBAE(extrinsic_dim, intrinsic_dim, h1, encoder_act, decoder_act)
-curve_ae = DACTBAE(extrinsic_dim, intrinsic_dim, h1, encoder_act, decoder_act)
+dactbae = DACTBAE(extrinsic_dim, intrinsic_dim, h1, encoder_act, decoder_act)
 
 # Define the loss functions for each auto encoder
 ae_loss = AELoss()
@@ -120,32 +120,19 @@ c2ae_loss = CHAELoss(contractive_weight=contractive_weight, hessian_weight=secon
 tbae_loss = TBAELoss(tangent_bundle_weight=tangent_bundle_weight, norm=tangent_bundle_norm)
 ctbae_loss = CTBAELoss(contractive_weight=contractive_weight, tangent_bundle_weight=tangent_bundle_weight,
                        norm=tangent_bundle_norm)
-curve_loss = DACTBAELoss(contractive_weight=contractive_weight, tangent_drift_weight=tangent_drift_weight,
+dactbae_loss = DACTBAELoss(contractive_weight=contractive_weight, tangent_drift_weight=tangent_drift_weight,
                          tangent_bundle_weight=tangent_bundle_weight, norm=tangent_bundle_norm)
 
 # Run the program.
 if __name__ == "__main__":
+    print("Training Auto encoder")
     fit_model(ae, ae_loss, x, None, lr, epochs, print_freq, weight_decay, batch_size)
+    print("Training contractive AE")
     fit_model(cae, cae_loss, x, None, lr, epochs, print_freq, weight_decay, batch_size)
     fit_model(c2ae, c2ae_loss, x, None, lr, epochs, print_freq, weight_decay, batch_size)
     fit_model(tbae, tbae_loss, x, P, lr, epochs, print_freq, weight_decay, batch_size)
     fit_model(ctbae, ctbae_loss, x, P, lr, epochs, print_freq, weight_decay, batch_size)
-    fit_model(curve_ae, curve_loss, x, (P, PNN, mu, cov), lr, epochs, print_freq, weight_decay, batch_size)
-    # This computes the total loss of each model, which is probably an unfair comparison, no?
-    # interpolation_error_ae = ae_loss.forward(ae, x_interp).item()
-    # interpolation_error_cae = cae_loss.forward(cae, x_interp)
-    # interpolation_error_c2ae = c2ae_loss.forward(c2ae, x_interp)
-    # interpolation_error_tbae = tbae_loss.forward(tbae, x_interp, P_interp)
-    # interpolation_error_ctbae = ctbae_loss.forward(ctbae, x_interp, P_interp)
-    # interpolation_error_curve_ae = curve_loss.forward(curve_ae, x_interp, (P_interp, N_interp, mu_interp, cov_interp))
-    # # Compute extrapolation error
-    # extrapolation_error_ae = ae_loss.forward(ae, x_extrap).item()
-    # extrapolation_error_cae = cae_loss.forward(cae, x_extrap)
-    # extrapolation_error_c2ae = c2ae_loss.forward(c2ae, x_extrap)
-    # extrapolation_error_tbae = tbae_loss.forward(tbae, x_extrap, P_extrap)
-    # extrapolation_error_ctbae = ctbae_loss.forward(ctbae, x_extrap, P_extrap)
-    # extrapolation_error_curve_ae = curve_loss.forward(curve_ae, x_extrap, (P_extrap, N_extrap, mu_extrap, cov_extrap))
-
+    fit_model(dactbae, dactbae_loss, x, (P, PNN, mu, cov), lr, epochs, print_freq, weight_decay, batch_size)
     # Instead lets just compute the reconstruction error of each model, the easiest way to do this
     # is to re-declare the loss functions with zero weights:
     ae_loss = AELoss()
@@ -154,28 +141,31 @@ if __name__ == "__main__":
     tbae_loss = TBAELoss(tangent_bundle_weight=0., norm=tangent_bundle_norm)
     ctbae_loss = CTBAELoss(contractive_weight=0., tangent_bundle_weight=0.,
                            norm=tangent_bundle_norm)
-    curve_loss = DACTBAELoss(contractive_weight=0., tangent_drift_weight=0.,
+    dactbae_loss = DACTBAELoss(contractive_weight=0., tangent_drift_weight=0.,
                              tangent_bundle_weight=0., norm=tangent_bundle_norm)
-
+    # TODO: this compares total losses. We should probably just compare reconstruction losses.
+    #  But this requires some refactoring since ae_loss expects the model to just return just the reconstruction
+    # Compute interpolation error
     interpolation_error_ae = ae_loss.forward(ae, x_interp).item()
     interpolation_error_cae = cae_loss.forward(cae, x_interp)
     interpolation_error_c2ae = c2ae_loss.forward(c2ae, x_interp)
     interpolation_error_tbae = tbae_loss.forward(tbae, x_interp, P_interp)
     interpolation_error_ctbae = ctbae_loss.forward(ctbae, x_interp, P_interp)
-    interpolation_error_curve_ae = curve_loss.forward(curve_ae, x_interp, (P_interp, N_interp, mu_interp, cov_interp))
+    interpolation_error_curve_ae = dactbae_loss.forward(dactbae, x_interp, (P_interp, N_interp, mu_interp, cov_interp))
     # Compute extrapolation error
     extrapolation_error_ae = ae_loss.forward(ae, x_extrap).item()
     extrapolation_error_cae = cae_loss.forward(cae, x_extrap)
     extrapolation_error_c2ae = c2ae_loss.forward(c2ae, x_extrap)
     extrapolation_error_tbae = tbae_loss.forward(tbae, x_extrap, P_extrap)
     extrapolation_error_ctbae = ctbae_loss.forward(ctbae, x_extrap, P_extrap)
-    extrapolation_error_curve_ae = curve_loss.forward(curve_ae, x_extrap, (P_extrap, N_extrap, mu_extrap, cov_extrap))
+    extrapolation_error_curve_ae = dactbae_loss.forward(dactbae, x_extrap, (P_extrap, N_extrap, mu_extrap, cov_extrap))
+
 
     # diffeomorphism error
     interp_diffeo_error = [model.compute_diffeo_error(x_interp).detach() for model in
-                           [ae, cae, c2ae, tbae, ctbae, curve_ae]]
+                           [ae, cae, c2ae, tbae, ctbae, dactbae]]
     extrap_diffeo_error = [model.compute_diffeo_error(x_extrap).detach() for model in
-                           [ae, cae, c2ae, tbae, ctbae, curve_ae]]
+                           [ae, cae, c2ae, tbae, ctbae, dactbae]]
     print("Interpolation diffeo error")
     print(interp_diffeo_error)
     print("Extrapolation diffeo error")
@@ -238,7 +228,7 @@ if __name__ == "__main__":
     # Optionally, save LaTeX table to a file
     with open(f"plots/{surface}/autoencoder/error_table.tex", "w") as f:
         f.write(latex_table)
-    torch.save(curve_ae.state_dict(), f"plots/{surface}/autoencoder/curve_ae.pth")
+    torch.save(dactbae.state_dict(), f"plots/{surface}/autoencoder/dactbae.pth")
 
     # Detach for plots!
     x = x.detach()
@@ -267,5 +257,5 @@ if __name__ == "__main__":
 
     ax = fig.add_subplot(2, 3, 6, projection="3d")
     ax.scatter3D(x_extrap[:, 0], x_extrap[:, 1], x_extrap[:, 2])
-    curve_ae.plot_surface(alpha, beta, 30, ax, "DCTBAE")
+    dactbae.plot_surface(alpha, beta, 30, ax, "DCTBAE")
     plt.show()

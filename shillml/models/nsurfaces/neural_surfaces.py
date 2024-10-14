@@ -14,19 +14,6 @@ class FullRankLoss(nn.Module):
         return self.weight * torch.sum(torch.exp(-norms ** 2))
 
 
-class HyperSurfaceLoss(nn.Module):
-    def __init__(self, weight=1., *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.full_rank_loss = FullRankLoss(weight)
-
-    def forward(self, model_output: Tuple[Tensor, Tensor], targets=None):
-        f, df = model_output
-        manifold_constraint_loss = torch.mean(torch.linalg.vector_norm(f, ord=2, dim=1) ** 2)
-        full_rank_loss = self.full_rank_loss(df)
-        total_loss = manifold_constraint_loss + full_rank_loss
-        return total_loss
-
-
 class NeuralHyperSurface(nn.Module):
     def __init__(self, neurons, activation, intrinsic_dim=2, *args, **kwargs):
         """
@@ -123,6 +110,19 @@ class NeuralHyperSurface(nn.Module):
         return mu
 
 
+class HyperSurfaceLoss(nn.Module):
+    def __init__(self, weight=1., *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.full_rank_loss = FullRankLoss(weight)
+
+    def forward(self, model: NeuralHyperSurface, x: Tensor, targets=None):
+        f, df = model(x)
+        manifold_constraint_loss = torch.mean(torch.linalg.vector_norm(f, ord=2, dim=1) ** 2)
+        full_rank_loss = self.full_rank_loss(df)
+        total_loss = manifold_constraint_loss + full_rank_loss
+        return total_loss
+
+
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import numpy as np
@@ -136,10 +136,10 @@ if __name__ == "__main__":
     neurons = [3, 32, 32, 1]
     fr_weight = 0.5
     lr = 0.001
-    epochs = 20000
+    epochs = 4000
     weight_decay = 0.01
     tn = 3.5
-    ntime = 5000
+    ntime = 9000
     npaths = 5
     activation = nn.Tanh()
     # Metal has some issues:
@@ -148,8 +148,10 @@ if __name__ == "__main__":
     # on https://github.com/pytorch/pytorch/issues/77764. As a temporary fix, you can set the
     # environment variable `PYTORCH_ENABLE_MPS_FALLBACK=1` to use the CPU as a fallback for this op.
     # WARNING: this will be slower than running natively on MPS.
-    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     device = torch.device("cpu")
+    # generating a random sphere
     rng = np.random.default_rng(seed)
     x = rng.normal(size=(num_pts, 3))
     x = x / np.linalg.norm(x, axis=1, ord=2, keepdims=True)
@@ -162,15 +164,14 @@ if __name__ == "__main__":
     x_test = rng.normal(size=(500, 3))
     x_test = x_test / np.linalg.norm(x_test, axis=1, ord=2, keepdims=True)
     x_test = torch.tensor(x_test, dtype=torch.float32).to(device)
-    print("Test loss = " + str(hyp_loss(hyp(x_test)).item()))
+    print("Test loss = " + str(hyp_loss(hyp, x_test, None).item()))
 
     sde = SDE(hyp.drift_coefficient, hyp.diffusion_coefficient)
     sample_paths = sde.sample_ensemble(x[0, :].detach().cpu(), tn, ntime, npaths)
 
+    # Plot model generated sample paths
     fig = plt.figure()
     ax = plt.subplot(111, projection="3d")
     for i in range(npaths):
         ax.plot3D(sample_paths[i, :, 0], sample_paths[i, :, 1], sample_paths[i, :, 2], c="black", alpha=0.8)
     plt.show()
-
-

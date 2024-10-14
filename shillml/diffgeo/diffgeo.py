@@ -135,7 +135,9 @@ class RiemannianManifold:
         Returns:
             Matrix: The local Brownian motion drift.
         """
+        print("Inverting metric tensor...")
         g_inv = sp.simplify(self.metric_tensor().inv())
+        print("Computing manifold divergence of g^{-1}...")
         return sp.simplify(self.manifold_divergence(g_inv) / 2)
 
     def local_bm_diffusion(self, method: str = "pow") -> Matrix:
@@ -148,7 +150,7 @@ class RiemannianManifold:
         Returns:
             Matrix: The local Brownian motion diffusion.
         """
-        return self.g_orthonormal_frame(method)
+        return sp.simplify(self.g_orthonormal_frame(method))
 
     def christoffel_symbols(self) -> MutableDenseNDimArray:
         """
@@ -358,7 +360,9 @@ class RiemannianManifold:
         return sp.lambdify(self.local_coordinates, expr, modules='numpy')
 
     def create_local_bm_sde(self) -> SDE:
+        print("Computing local drift...")
         mu = self.sympy_to_numpy(self.local_bm_drift())
+        print("Computing local diffusion...")
         sigma = self.sympy_to_numpy(self.local_bm_diffusion())
 
         def drift(t, x):
@@ -467,6 +471,7 @@ if __name__ == "__main__":
     npaths = 10
     ntime = 15000
     x0 = np.array([1., 1.])
+    print("Simulating paths...")
     local_paths, global_paths = man.simulate_rbm(x0, tn, ntime, npaths)
     man.plot_rbm(local_paths, global_paths)
 

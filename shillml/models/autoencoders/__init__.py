@@ -6,3 +6,4 @@ from .ctbae import CTBAE
 from .dactbae import DACTBAE
 from .dachtbae import DACHTBAE
 from .new_ae import NewAE
+from .autoencoder import AutoEncoder1

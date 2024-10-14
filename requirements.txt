@@ -9,3 +9,4 @@ pillow~=10.4.0
 datasets~=2.20.0
 tqdm~=4.66.4
 seaborn~=0.13.2
+pandas~=2.2.2

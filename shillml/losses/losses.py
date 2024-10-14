@@ -368,7 +368,7 @@ class NewAELoss(CTBAELoss):
                                                                                     observed_projection)
         tangent_drift_error = self.tangent_drift_weight * self.tangent_drift_loss(normal_proj_vector)
         # Compute the Frobenius norm term: ||Dpi - g^-1 Dphi^T||_F^2
-        frobenius_term = self.diffeo_weight * torch.mean(torch.norm(dpi - torch.bmm(g_inv, dphi.mT), p='fro') ** 2)
+        frobenius_term = self.diffeo_weight * torch.mean(torch.norm(torch.bmm(g, dpi) - dphi.mT, p='fro') ** 2)
         total_loss = mse + contractive_penalty + tangent_bundle_error + tangent_drift_error + frobenius_term
         return total_loss
 
@@ -616,7 +616,7 @@ class DiffusionLoss2(nn.Module):
         total_loss : Tensor
             The computed total loss combining covariance MSE, local covariance MSE, and weighted tangent drift loss.
         """
-        dphi, g_inv, normal_proj, qv, bbt = ae_diffusion.forward(x)
+        dphi, g, normal_proj, qv, bbt = ae_diffusion.forward(x)
         ambient_drift, ambient_cov, encoded_cov, orthonormal_frame = targets
         tangent_vector = ambient_drift - 0.5 * qv
         orthonormal_frame_times_td = torch.bmm(orthonormal_frame.mT, tangent_vector.unsqueeze(2))
@@ -629,13 +629,14 @@ class DiffusionLoss2(nn.Module):
         normal_bundle_loss = self.tangent_drift_loss(normal_proj_vector)
         # New loss term:
         # Compute Dphi^T Sigma Dphi
-        dphi_t_ambient_cov = torch.bmm(dphi.mT, torch.bmm(ambient_cov, dphi))
+        transformed_cov = torch.bmm(dphi.mT, torch.bmm(ambient_cov, dphi))
         # Now compute g_inv Dphi^T Sigma Dphi g_inv
-        transformed_cov = torch.bmm(g_inv, torch.bmm(dphi_t_ambient_cov, g_inv))
+        transformed_latent_cov = torch.bmm(g, torch.bmm(bbt, g))
         # Frobenius norm term: ||X - g^-1 Dphi^T Sigma Dphi g^-1||_F^2
-        # where X is the local model covariance bbt
-        frobenius_term = torch.mean(torch.norm(bbt - transformed_cov, p='fro') ** 2)
-        total_loss = local_cov_mse + self.tangent_drift_weight * normal_bundle_loss + frobenius_term
+        # where X is the local model covariance bbt or
+        # ||gXg - Dphi^T Sigma Dphi||_F^2
+        frobenius_term = torch.mean(torch.norm(transformed_latent_cov - transformed_cov, p='fro') ** 2)
+        total_loss = local_cov_mse + self.tangent_drift_weight * normal_bundle_loss + 0.1*frobenius_term
         return total_loss
 
 
@@ -692,7 +693,7 @@ class DriftMSELoss(nn.Module):
         z = drift_model.autoencoder.encoder(x)
         latent_drift = drift_model.latent_sde.drift_net(z)
         decoder_hessian = drift_model.autoencoder.decoder_hessian(z)
-        q = drift_model.ambient_quadratic_variation_drift(encoded_cov, decoder_hessian)
+        q = ambient_quadratic_variation_drift(encoded_cov, decoder_hessian)
         model_ambient_drift = drift_model(x)
         dphi = drift_model.autoencoder.decoder_jacobian(z)
         ginv = torch.linalg.inv(drift_model.autoencoder.neural_metric_tensor(z))
@@ -759,8 +760,9 @@ class DriftMSELoss2(nn.Module):
         decoder_hessian = drift_model.autoencoder.decoder_hessian(z)
         q = ambient_quadratic_variation_drift(encoded_cov, decoder_hessian)
         dphi = drift_model.autoencoder.decoder_jacobian(z)
-        ginv = torch.linalg.inv(drift_model.autoencoder.neural_metric_tensor(z))
+        g = drift_model.autoencoder.neural_metric_tensor(z)
         tangent_drift = observed_ambient_drift - 0.5 * q
-        true_latent_drift = torch.bmm(ginv, torch.bmm(dphi.mT, tangent_drift.unsqueeze(2))).squeeze()
-        latent_error = torch.mean(torch.linalg.vector_norm(latent_drift - true_latent_drift, ord=2, dim=1) ** 2)
+        true_latent_drift = torch.bmm(dphi.mT, tangent_drift.unsqueeze(2)).squeeze()
+        g_latent_drift = torch.bmm(g, latent_drift.unsqueeze(2)).squeeze(2)
+        latent_error = torch.mean(torch.linalg.vector_norm(g_latent_drift - true_latent_drift, ord=2, dim=1) ** 2)
         return latent_error

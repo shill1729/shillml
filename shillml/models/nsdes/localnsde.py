@@ -156,7 +156,7 @@ class AutoEncoderDiffusion2(AutoEncoderDiffusionGeometry):
         P = torch.bmm(torch.bmm(dphi, g_inv), dphi.mT)
         N = torch.eye(self.extrinsic_dim).expand(x.shape[0], self.extrinsic_dim, self.extrinsic_dim) - P
         # Exact normal term
-        return dphi, g_inv, N, q, bbt
+        return dphi, g, N, q, bbt
 
 
 class AutoEncoderDrift(AutoEncoderDiffusionGeometry):

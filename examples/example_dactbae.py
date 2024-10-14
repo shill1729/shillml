@@ -18,13 +18,15 @@ if __name__ == "__main__":
     from shillml.pointclouds import PointCloud
     from shillml.models.autoencoders import DACTBAE
     from shillml.models.nsdes import AutoEncoderDrift, AutoEncoderDiffusion, LatentNeuralSDE
+    from shillml.models.nsdes import ambient_quadratic_variation_drift
     from shillml.pointclouds.dynamics import SDECoefficients
     # Inputs
     train_seed = 17
     test_seed = None
+    dynamics = "rbm"  # 'bm', 'rbm', 'langevin'
     torch.manual_seed(train_seed)
     epsilon = 0.5
-    bounds = [(-1.2, 1.2), (-1.2, 1.2)]
+    bounds = [(-1, 1), (-1, 1)]
     large_bounds = [(-1 - epsilon, 1 + epsilon), (-1 - epsilon, 1 + epsilon)]
     c1, c2 = 5, 5
     num_points = 30
@@ -37,32 +39,37 @@ if __name__ == "__main__":
     drift_act = nn.GELU()
     diffusion_act = nn.GELU()
     lr = 0.0001
-    epochs_ae = 20000
-    epochs_sde = 20000
+    epochs_ae = 10000
+    epochs_sde = 10000
     batch_size = num_points
     ntime = 5000
     npaths = 10
     tn = 1.
     contractive_weight = 0.001
-    encoder_hessian_weight = 0.
-    tangent_drift_weight = 0.001
-    tangent_bundle_weight = 0.001
+    tangent_drift_weight = 0.01
+    tangent_bundle_weight = 0.01
 
     # Define the manifold
     u, v = sp.symbols("u v", real=True)
     local_coordinates = sp.Matrix([u, v])
-    chart = sp.Matrix([u, v, 0.8*sp.exp(-(u**2+v**2)/10)/10+0.2*sp.exp(-((u-0.5)**2+(v-0.5)**2)/15)/15])
+    fuv = u*v/10
+    chart = sp.Matrix([u, v, fuv])
     manifold = RiemannianManifold(local_coordinates, chart)
     coefs = SDECoefficients()
-    # BM
-    local_drift = sp.Matrix([0, 0])
-    local_diffusion = sp.Matrix([[1, 0], [0, 1]])
-    # RBM
-    # local_drift = manifold.local_bm_drift()
-    # local_diffusion = manifold.local_bm_diffusion()
-    # # Langevin with double well potential
-    # local_drift = manifold.local_bm_drift() - 0.2*manifold.metric_tensor().inv() * sp.Matrix([4 * u * (u ** 2 - 1), 2 * v])
-    # local_diffusion = manifold.local_bm_diffusion()*coefs.diffusion_circular()
+    if dynamics == "bm":
+        # BM
+        local_drift = sp.Matrix([0, 0])
+        local_diffusion = sp.Matrix([[1, 0], [0, 1]])
+    elif dynamics == "rbm":
+        # RBM
+        local_drift = manifold.local_bm_drift()
+        local_diffusion = manifold.local_bm_diffusion()
+    elif dynamics == "langevin":
+        # Langevin with double well potential
+        local_drift = manifold.local_bm_drift() - 0.2*manifold.metric_tensor().inv() * sp.Matrix([4 * u * (u ** 2 - 1), 2 * v])
+        local_diffusion = manifold.local_bm_diffusion()*coefs.diffusion_circular()
+    else:
+        raise ValueError("dynamics not implemented")
 
     # Generate the point cloud plus dynamics observations
     cloud = PointCloud(manifold, bounds, local_drift, local_diffusion)

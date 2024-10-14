@@ -14,8 +14,8 @@ def matrix_divergence(a: sp.Matrix, x: sp.Matrix):
     d = sp.zeros(n, 1)
     for i in range(n):
         for j in range(m):
-            d[i] += sp.simplify(sp.diff(a[i, j], x[j]))
-    return sp.simplify(d)
+            d[i] += sp.diff(a[i, j], x[j])
+    return d
 
 
 def hessian(f: sp.Matrix, x: sp.Matrix, return_grad=False):

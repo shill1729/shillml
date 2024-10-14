@@ -84,7 +84,6 @@ def mala_sampling(model: ScoreModel, num_samples, step_size, num_steps, burn_in=
 
     for step in range(num_steps):
         current_samples = samples.clone()
-        # current_score = model(current_samples)
         current_score = model.score_net.forward(current_samples)
         # Propose new samples
         noise = torch.randn_like(current_samples)
@@ -141,7 +140,7 @@ if __name__ == "__main__":
     data = generate_toy_data(8000)
     score_loss = ScoreBasedMatchingLoss()
     # Need batching
-    fit_model(model, score_loss, data, [data], epochs=100, batch_size=128)
+    fit_model(model, score_loss, data, [data], epochs=200, batch_size=128)
     # Initialize with random samples
     samples = mala_sampling(
         model,

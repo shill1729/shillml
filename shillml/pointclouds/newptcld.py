@@ -10,7 +10,7 @@ import numpy as np
 
 class PointCloud:
     def __init__(self, manifold: RiemannianManifold, bounds: List[Tuple],
-                 local_drift: sp.Matrix = None, local_diffusion: sp.Matrix = None):
+                 local_drift: sp.Matrix = None, local_diffusion: sp.Matrix = None, compute_orthogonal_proj=False):
 
         """
                 Initialize the PointCloud object.
@@ -27,6 +27,9 @@ class PointCloud:
         self.dimension = len(manifold.local_coordinates)
         self.target_dim = len(manifold.chart)
         self.chart_jacobian = self.manifold.chart_jacobian()
+        if compute_orthogonal_proj:
+            self.orthogonal_proj = self.manifold.orthogonal_projection(method="pow")
+            self.np_orthogonal_proj = self.manifold.sympy_to_numpy(self.orthogonal_proj)
 
         # Create numpy functions
         self.np_volume_measure = self.manifold.sympy_to_numpy(self.manifold.volume_density())
@@ -112,6 +115,11 @@ class PointCloud:
         self.observed_tangent_drift = tangent_drift
 
         return points.squeeze(), weights, extrinsic_drifts.squeeze(), extrinsic_covariances, param_samples
+
+    def get_true_orthogonal_proj(self, param_samples):
+        if hasattr(self, "np_orthogonal_proj"):
+            p = np.array([self.np_orthogonal_proj(*sample) for sample in param_samples])
+        return p
 
     def plot_point_cloud(self, points=None, drifts=None, plot_drift=False,
                          drift_scale=1.0, alpha=0.5, figsize=(10, 8)):

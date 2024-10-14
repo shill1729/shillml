@@ -227,14 +227,14 @@ if __name__ == "__main__":
 
     # Choose which SDE to run
     device = "cpu"
-    sde_choice = "sphere"  # Options: "OU", "GBM", "CIR", "circle", "sphere", "chaos"
-    x00 = [1, 0, 0]
-    noise_dim = 3
+    sde_choice = "OU"  # Options: "OU", "GBM", "CIR", "circle", "sphere", "chaos"
+    x00 = [1]
+    noise_dim = 1
     x0 = torch.tensor(x00, dtype=torch.float32)
     x0np = np.array(x00)
     tn = 1.
     ntime = 1000
-    ntrain = 500
+    ntrain = 900
     npaths = 10
     npaths_fit = 30
     seed = 17

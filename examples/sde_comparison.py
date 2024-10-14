@@ -38,7 +38,7 @@ def load_model_weights(model, file_path):
 
 # Usage
 ctbae = DACTBAE(extrinsic_dim, intrinsic_dim, h1, encoder_act, decoder_act)
-ctbae = load_model_weights(ctbae, f"plots/{surface}/autoencoder/curve_ae.pth")
+ctbae = load_model_weights(ctbae, f"plots/{surface}/autoencoder/dactbae.pth")
 # Switch surface in ae_comparison.py to load different trained AEs
 # ctbae = load_model_weights(ctbae, f"results/{surface}/{dynamics}/curve_ae.pth")
 

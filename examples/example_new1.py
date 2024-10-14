@@ -13,52 +13,78 @@ if __name__ == "__main__":
     import numpy as np
     import seaborn as sns
     import matplotlib.pyplot as plt
-    from shillml.utils import fit_model, process_data, set_grad_tracking
-    from shillml.losses import NewAELoss, DiffusionLoss2, DriftMSELoss2
+    from shillml.utils import fit_model, process_data, set_grad_tracking, compute_test_losses
+    from shillml.losses import DiffusionLoss2, DriftMSELoss2
+    from shillml.losses.loss_modules import TotalLoss
     from shillml.diffgeo import RiemannianManifold
     from shillml.pointclouds import PointCloud
-    from shillml.models.autoencoders import NewAE
+    from shillml.models.autoencoders import AutoEncoder1
     from shillml.models.nsdes import AutoEncoderDrift, AutoEncoderDiffusion2, LatentNeuralSDE
     from shillml.models.nsdes import ambient_quadratic_variation_drift
     from shillml.pointclouds.dynamics import SDECoefficients
-
+    # TODO: drop out, batch normalization, skip connections-- try these architectures, try differen tinitial network
+    # weights
     # Inputs
     train_seed = 17
+    norm = "fro"
     test_seed = None
     torch.manual_seed(train_seed)
-    epsilon = 0.5
-    bounds = [(-1, 1), (-1, 1)]
-    large_bounds = [(-1 - epsilon, 1 + epsilon), (-1 - epsilon, 1 + epsilon)]
-    c1, c2 = 5, 9
     num_points = 30
+    batch_size = 30
     num_test = 100
+    # Boundary for point cloud
+    a = -2
+    b = 2
+    epsilon = 1.
+    bounds = [(a, b), (a, b)]
+    large_bounds = [(a - epsilon, b + epsilon), (a - epsilon, b + epsilon)]
     input_dim, latent_dim = 3, 2
-    hidden_layers = [64]
+    hidden_layers = [32]
     sde_layers = [64]
     encoder_act = nn.Tanh()
     decoder_act = nn.Tanh()
     drift_act = nn.GELU()
     diffusion_act = nn.GELU()
-    lr = 0.0001
-    epochs_ae = 10000
-    epochs_diffusion = 100
-    epochs_drift = 100
-    batch_size = num_points
+    lr = 0.001 # TODO learning rate schedule
+    epochs_ae = 20000
+    epochs_diffusion = 30000
+    epochs_drift = 30000
     ntime = 8000
     npaths = 30
     tn = 0.5
-    contractive_weight = 0.00001
-    tangent_drift_weight = 0.001
-    tangent_bundle_weight = 0.001
-    diffeo_weight = 0.00001
+    contractive_weight = 0.
+    decoder_contractive_reg = 0.
+    tangent_drift_weight = 0.015
+    tangent_bundle_weight = 0.01
+    diffeo_weight1 = 0.
+    diffeo_weight2 = 0.
+    rank_penalty = 0.
+    rank_scale = 1.
+    variance_log = 0.
+    orthogonal_weight = 0.
+    weight_decay = 0.
+    # Flattening factors
+    c1, c2 = 10, 10
 
     # Define the manifold
     u, v = sp.symbols("u v", real=True)
     local_coordinates = sp.Matrix([u, v])
-    chart = sp.Matrix(
-        [u, v, -(u/10)**2+(v/10)**2])
+    # Product
+    fuv = u*v/c1
+
+    # Paraboloid
+    # fuv = (u/c1)**2+(v/c2)**2
+
+    # # Mixture of Gaussians
+    # sigma_2 = 1.
+    # fuv = (0.5 * sp.exp(-((u + 0.9) ** 2 + (v + 0.9) ** 2) / (2 * sigma_2)) / (np.sqrt(2 * np.pi * sigma_2)) +
+    #        0.5 * sp.exp(-((u - 0.9) ** 2 + (v - 0.9) ** 2) / (2 * sigma_2)) / (np.sqrt(2 * np.pi * sigma_2)))
+
+    # Creating the manifold
+    chart = sp.Matrix([u, v, fuv])
     manifold = RiemannianManifold(local_coordinates, chart)
     coefs = SDECoefficients()
+
     # BM
     # local_drift = sp.Matrix([0, 0])
     # local_diffusion = sp.Matrix([[1, 0], [0, 1]])
@@ -66,22 +92,43 @@ if __name__ == "__main__":
     # local_drift = manifold.local_bm_drift()
     # local_diffusion = manifold.local_bm_diffusion()
     # # Langevin with double well potential
-    local_drift = manifold.local_bm_drift() - 0.2*manifold.metric_tensor().inv() * sp.Matrix([4 * u * (u ** 2 - 1), 2 * v])
-    local_diffusion = manifold.local_bm_diffusion()*coefs.diffusion_circular()
+    local_drift = manifold.local_bm_drift() - 0.2 * manifold.metric_tensor().inv() * sp.Matrix(
+        [4 * u * (u ** 2 - 1), 2 * v])
+    local_diffusion = manifold.local_bm_diffusion() * coefs.diffusion_circular()/5
 
     # Generate the point cloud plus dynamics observations
-    cloud = PointCloud(manifold, bounds, local_drift, local_diffusion)
-    x, _, mu, cov, _ = cloud.generate(num_points, seed=train_seed)  # returns points, weights, drifts, cov, local coord
+    cloud = PointCloud(manifold, bounds, local_drift, local_diffusion, compute_orthogonal_proj=True)
+    # returns points, weights, drifts, cov, local coord
+    x, _, mu, cov, local_x = cloud.generate(num_points, seed=train_seed)
+    p_true = cloud.get_true_orthogonal_proj(local_x)
+    p_true = torch.tensor(p_true, dtype=torch.float32)
     x, mu, cov, p, orthogcomp, orthonormal_frame = process_data(x, mu, cov, d=2, return_frame=True)
+    print("Error of SVD-P versus true P")
+    print(torch.mean(torch.linalg.matrix_norm(p-p_true, ord="fro")))
+
 
     # Define AE model
-    ae = NewAE(input_dim, latent_dim, hidden_layers, encoder_act, decoder_act)
-    ae_loss = NewAELoss(contractive_weight=contractive_weight,
-                        tangent_drift_weight=tangent_drift_weight,
-                        tangent_bundle_weight=tangent_bundle_weight,
-                        diffeo_weight=diffeo_weight
-                        )
-    fit_model(ae, ae_loss, x, targets=(p, orthogcomp, mu, cov, orthonormal_frame), lr=lr, epochs=epochs_ae, batch_size=batch_size)
+    ae = AutoEncoder1(input_dim, latent_dim, hidden_layers, encoder_act, decoder_act)
+    weights = {"reconstruction": 1.,
+               "rank_penalty": rank_penalty,
+               "contractive_reg": contractive_weight,
+               "decoder_contractive_reg": decoder_contractive_reg,
+               "tangent_bundle": tangent_bundle_weight,
+               "drift_alignment": tangent_drift_weight,
+               "diffeo_reg1": diffeo_weight1,
+               "diffeo_reg2": diffeo_weight2,
+               "variance_logdet": variance_log,
+               "orthogonal": orthogonal_weight}
+    ae_loss = TotalLoss(weights, norm, rank_scale)
+    print("Pre-training losses")
+    # Print results
+    pre_train_losses = compute_test_losses(ae, ae_loss, x, p, orthonormal_frame, cov, mu)
+    for key, value in pre_train_losses.items():
+        print(f"{key} = {value:.4f}")
+
+    print("\nTraining Autoencoder")
+    fit_model(ae, ae_loss, x, targets=(p, orthonormal_frame, cov, mu), lr=lr, epochs=epochs_ae,
+              batch_size=batch_size, weight_decay=weight_decay)
     set_grad_tracking(ae, False)
 
     # Define diffusion model
@@ -92,7 +139,8 @@ if __name__ == "__main__":
     model_diffusion = AutoEncoderDiffusion2(latent_sde, ae)
     dpi = ae.encoder.jacobian_network(x).detach()
     encoded_cov = torch.bmm(torch.bmm(dpi, cov), dpi.mT)
-    diffusion_loss = DiffusionLoss2(tangent_drift_weight=tangent_drift_weight)
+    diffusion_loss = DiffusionLoss2(tangent_drift_weight=tangent_drift_weight, norm=norm)
+    print("\nTraining diffusion")
     fit_model(model_diffusion,
               diffusion_loss,
               x,
@@ -101,6 +149,7 @@ if __name__ == "__main__":
               batch_size=batch_size)
     set_grad_tracking(latent_sde.diffusion_net, False)
     drift_loss = DriftMSELoss2()
+    print("\nTraining drift")
     fit_model(model_drift,
               drift_loss,
               x,
@@ -109,16 +158,17 @@ if __name__ == "__main__":
               batch_size=batch_size)
 
     # Compute test loss
-    x, _, mu, cov, _, = cloud.generate(num_test, seed=test_seed)
-    x, mu, cov, p, orthogcomp, orthonormal_frame = process_data(x, mu, cov, d=2, return_frame=True)
-    dpi = ae.encoder.jacobian_network(x).detach()
-    encoded_cov = torch.bmm(torch.bmm(dpi, cov), dpi.mT)
-    dl = diffusion_loss.forward(model_diffusion, x, (mu, cov, encoded_cov, orthonormal_frame))
-    drl = drift_loss(model_drift, x, (mu, encoded_cov))
-    aeloss = ae_loss.forward(ae, x, (p, orthogcomp, mu, cov, orthonormal_frame))
+    cloud = PointCloud(manifold, large_bounds, local_drift, local_diffusion)
+    x_test, _, mu_test, cov, _, = cloud.generate(num_test, seed=test_seed)
+    x_test, mu_test, cov_test, p_test, orthogcomp_test, orthonormal_frame_test = process_data(x_test, mu_test, cov, d=2, return_frame=True)
+    dpi = ae.encoder.jacobian_network(x_test).detach()
+    encoded_cov = torch.bmm(torch.bmm(dpi, cov_test), dpi.mT)
+    dl = diffusion_loss.forward(model_diffusion, x_test, (mu_test, cov_test, encoded_cov, orthonormal_frame_test))
+    drl = drift_loss(model_drift, x_test, (mu_test, encoded_cov))
+    aeloss = ae_loss.forward(ae, x_test, (p_test, orthonormal_frame_test, cov_test, mu_test))
 
     # Calculate error
-    z = ae.encoder(x)
+    z = ae.encoder(x_test)
     latent_diff = model_diffusion.latent_sde.diffusion(z)
     bbt = torch.bmm(latent_diff, latent_diff.mT)
     decoder_hess = ae.decoder_hessian(z)
@@ -127,14 +177,21 @@ if __name__ == "__main__":
     q_term_error = torch.mean(torch.linalg.vector_norm(q_true - q_model, ord=2, dim=1) ** 2)
     # Tangent drift error
     tangent_drift_true = torch.tensor(cloud.observed_tangent_drift, dtype=torch.float).squeeze()
-    tangent_drift_model = model_drift.forward(x) - 0.5 * q_model
+    tangent_drift_model = model_drift.forward(x_test) - 0.5 * q_model
     tangent_drift_error = torch.mean(
         torch.linalg.vector_norm(tangent_drift_model - tangent_drift_true, ord=2, dim=1) ** 2)
     # error_bound
     error_bound = q_term_error + tangent_drift_error
 
     # Print results
-    print("AE extrapolation loss = " + str(aeloss.detach().numpy()))
+    losses = compute_test_losses(ae, ae_loss, x_test, p_test, orthonormal_frame_test, cov_test, mu_test)
+    print("\nAutoencoder losses/penalities")
+    for key, value in losses.items():
+        print(f"{key} = {value:.4f}")
+
+    print("AE extrapolation total weighted loss = " + str(aeloss.detach().numpy()))
+
+    print("\nSDE losses")
     print("Drift extrapolation loss = " + str(drl.detach().numpy()))
     print("Diffusion extrapolation loss = " + str(dl.detach().numpy()))
     print("q terms error = " + str(q_term_error.detach().numpy()))
@@ -144,13 +201,26 @@ if __name__ == "__main__":
     # Visualization
     x_hat = ae.decoder(ae.encoder(x)).detach()
     mu_hat = model_drift(x_hat).detach()
+    x_hat_test = ae.decoder(ae.encoder(x_test)).detach()
+    mu_hat_test = model_drift(x_hat_test).detach()
     x = x.detach()
+    x_test = x_test.detach()
+
     fig = plt.figure()
     ax = plt.subplot(111, projection="3d")
     ax.scatter(x[:, 0], x[:, 1], x[:, 2])
-    ax.quiver(x[:, 0], x[:, 1], x[:, 2], mu[:, 0], mu[:, 1], mu[:, 2], normalize=True, length=0.1)
-    ax.quiver(x_hat[:, 0], x_hat[:, 1], x_hat[:, 2], mu_hat[:, 0], mu_hat[:, 1], mu_hat[:, 2], normalize=True,
-              length=0.1, color="red")
+    # ax.quiver(x[:, 0], x[:, 1], x[:, 2], mu[:, 0], mu[:, 1], mu[:, 2], normalize=True, length=0.1)
+    # ax.quiver(x_hat[:, 0], x_hat[:, 1], x_hat[:, 2], mu_hat[:, 0], mu_hat[:, 1], mu_hat[:, 2], normalize=True,
+    #           length=0.1, color="red")
+    ae.plot_surface(-1, 1, grid_size=30, ax=ax, title="New Model")
+    plt.show()
+
+    fig = plt.figure()
+    ax = plt.subplot(111, projection="3d")
+    ax.scatter(x_test[:, 0], x_test[:, 1], x_test[:, 2])
+    # ax.quiver(x_test[:, 0], x_test[:, 1], x_test[:, 2], mu_test[:, 0], mu_test[:, 1], mu_test[:, 2], normalize=True, length=0.1)
+    # ax.quiver(x_hat_test[:, 0], x_hat_test[:, 1], x_hat_test[:, 2], mu_hat_test[:, 0], mu_hat_test[:, 1], mu_hat_test[:, 2], normalize=True,
+    #           length=0.1, color="red")
     ae.plot_surface(-1, 1, grid_size=30, ax=ax, title="New Model")
     plt.show()
 
@@ -174,7 +244,7 @@ if __name__ == "__main__":
                   alpha=0.8)
         ax.plot3D(model_ambient_paths[i, :, 0], model_ambient_paths[i, :, 1], model_ambient_paths[i, :, 2], c="blue",
                   alpha=0.8)
-    ae.plot_surface(-1, 1, grid_size=30, ax=ax, title="New Model")
+    ae.plot_surface(-1, 1, grid_size=30, ax=ax, title="Reconstruction")
     plt.show()
 
     # Plot densities of first coordinate of terminal:
@@ -189,7 +259,7 @@ if __name__ == "__main__":
         sns.kdeplot(model_first_coord_terminal, label='Model', color='blue', fill=True)
 
         # Customize the plot
-        plt.title('KDEs of the '+str(i)+'-th Coordinate at Terminal Time')
+        plt.title('KDEs of the ' + str(i+1) + '-th Coordinate at Terminal Time')
         plt.xlabel('First Coordinate at Terminal Time')
         plt.ylabel('Density')
         plt.legend()

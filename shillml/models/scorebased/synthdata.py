@@ -62,7 +62,7 @@ def ornstein_uhlenbeck_diffusion(t, x, sigma=0.3):
 
 # Example usage
 if __name__ == "__main__":
-    # Brownian Motion in 1D, 2D, and 3D
+    # Brownian Motion in 1D, 2D, and 3zD
     bm_sde = SDE(brownian_motion, brownian_diffusion)
     bm_generator = SyntheticDataGenerator(bm_sde)
 
