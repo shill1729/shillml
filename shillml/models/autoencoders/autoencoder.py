@@ -16,7 +16,6 @@ import torch
 from shillml.models.ffnn import FeedForwardNeuralNet
 
 
-# TODO: there is no forward
 class AutoEncoder1(nn.Module):
     def __init__(self,
                  extrinsic_dim: int,
@@ -54,18 +53,17 @@ class AutoEncoder1(nn.Module):
         # Tie the weights of the decoder to be the transpose of the encoder, in reverse due
         self.decoder.tie_weights(self.encoder)
 
-    def lift_sample_paths(self, latent_ensemble: np.ndarray) -> np.ndarray:
+    def forward(self, x: Tensor) -> Tensor:
         """
-        Lift the latent paths to the ambient space using the decoder.
+        Forward pass of the autoencoder.
 
-        :param latent_ensemble: An array of latent paths of shape
-                                (num_samples, path_length, intrinsic_dim)
-        :return: Lifted ensemble in the ambient space of shape
-                 (num_samples, path_length, extrinsic_dim)
+        :param x: the observed point cloud of shape (batch_size, extrinsic_dim)
+        :return: the reconstructed point cloud x_hat of shape
+                 (batch_size, extrinsic_dim)
         """
-        lifted_ensemble = np.array([self.decoder(torch.tensor(path, dtype=torch.float32)).detach().numpy()
-                                    for path in latent_ensemble])
-        return lifted_ensemble
+        z = self.encoder(x)
+        x_hat = self.decoder(z)
+        return x_hat
 
     def encoder_jacobian(self, x: Tensor) -> Tensor:
         """
@@ -138,7 +136,20 @@ class AutoEncoder1(nn.Module):
         g = self.metric_tensor(z)
         return torch.sqrt(torch.linalg.det(g))
 
-    def plot_surface(self, a: float, b: float, grid_size: int, ax=None, title=None) -> None:
+    def lift_sample_paths(self, latent_ensemble: np.ndarray) -> np.ndarray:
+        """
+        Lift the latent paths to the ambient space using the decoder.
+
+        :param latent_ensemble: An array of latent paths of shape
+                                (num_samples, path_length, intrinsic_dim)
+        :return: Lifted ensemble in the ambient space of shape
+                 (num_samples, path_length, extrinsic_dim)
+        """
+        lifted_ensemble = np.array([self.decoder(torch.tensor(path, dtype=torch.float32)).detach().numpy()
+                                    for path in latent_ensemble])
+        return lifted_ensemble
+
+    def plot_surface(self, a: float, b: float, grid_size: int, ax=None, title=None, dim=3) -> None:
         """
         Plot the surface produced by the neural-network chart.
 
@@ -147,30 +158,48 @@ class AutoEncoder1(nn.Module):
         :param b: the ub of the encoder range box [a,b]^d
         :param grid_size: grid size for the mesh of the encoder range
         :param ax: plot axis object
+        :param dim: dimension to plot in, default 3
         :return:
         """
-        ux = np.linspace(a, b, grid_size)
-        vy = np.linspace(a, b, grid_size)
-        u, v = np.meshgrid(ux, vy, indexing="ij")
-        x1 = np.zeros((grid_size, grid_size))
-        x2 = np.zeros((grid_size, grid_size))
-        x3 = np.zeros((grid_size, grid_size))
-        for i in range(grid_size):
-            for j in range(grid_size):
-                x0 = np.column_stack([u[i, j], v[i, j]])
+        if dim == 3:
+            ux = np.linspace(a, b, grid_size)
+            vy = np.linspace(a, b, grid_size)
+            u, v = np.meshgrid(ux, vy, indexing="ij")
+            x1 = np.zeros((grid_size, grid_size))
+            x2 = np.zeros((grid_size, grid_size))
+            x3 = np.zeros((grid_size, grid_size))
+            for i in range(grid_size):
+                for j in range(grid_size):
+                    x0 = np.column_stack([u[i, j], v[i, j]])
+                    x0 = torch.tensor(x0, dtype=torch.float32)
+                    xx = self.decoder(x0).detach().numpy()
+                    x1[i, j] = xx[0, 0]
+                    x2[i, j] = xx[0, 1]
+                    x3[i, j] = xx[0, 2]
+            if ax is not None:
+                ax.plot_surface(x1, x2, x3, alpha=0.5, cmap="magma")
+                if title is not None:
+                    ax.set_title(title)
+                else:
+                    ax.set_title("NN manifold")
+            else:
+                raise ValueError("'ax' cannot be None")
+        elif dim == 2:
+            u = np.linspace(a, b, grid_size)
+            x1 = np.zeros((grid_size, grid_size))
+            x2 = np.zeros((grid_size, grid_size))
+            for i in range(grid_size):
+                x0 = np.column_stack([u[i]])
                 x0 = torch.tensor(x0, dtype=torch.float32)
                 xx = self.decoder(x0).detach().numpy()
-                x1[i, j] = xx[0, 0]
-                x2[i, j] = xx[0, 1]
-                x3[i, j] = xx[0, 2]
-        if ax is not None:
-            ax.plot_surface(x1, x2, x3, alpha=0.5, cmap="magma")
-            if title is not None:
-                ax.set_title(title)
-            else:
-                ax.set_title("NN manifold")
-        else:
-            raise ValueError("'ax' cannot be None")
+                x1[i] = xx[0, 0]
+                x2[i] = xx[0, 1]
+            if ax is not None:
+                ax.plot(x1, x2, alpha=0.9)
+                if title is not None:
+                    ax.set_title(title)
+                else:
+                    ax.set_title("NN manifold")
         return None
 
 
@@ -180,14 +209,16 @@ if __name__ == "__main__":
     from shillml.diffgeo import RiemannianManifold
     from shillml.pointclouds import PointCloud
     from shillml.utils import process_data
-    from shillml.losses.loss_modules import TotalLoss
+    from shillml.losses.loss_modules import TotalLoss, LossWeights
+    from shillml.utils import compute_test_losses
 
     seed = 17
     torch.manual_seed(seed)
     num_pts = 30
     num_test = 1000
     batch_size = 30
-    epochs = 8000
+    epochs = 20000
+    hidden_dims = [32, 32]
     lr = 0.001
     epsilon = 0.2
     npaths = 2
@@ -195,38 +226,40 @@ if __name__ == "__main__":
     ntime = 9000
     a = -1
     b = 1
+    weights = LossWeights()
+    weights.reconstruction = 1.
+    weights.tangent_drift_weight = 0.
+    weights.diffeomorphism_reg1 = 0.
+    weights.encoder_contraction_weight = 0.
     bounds = [(a, b), (a, b)]
     large_bounds = [(a - epsilon, b + epsilon), (a-epsilon, b + epsilon)]
-    c1 = 2
-    c2 = 2
-    weights = {"rank_penalty": 0.,
-               "contractive_reg": 0.,
-               "decoder_contractive_reg": 0.0001,
-               "tangent_bundle": 0.,
-               "drift_alignment": 0.,
-               "diffeo_reg1": 0.,
-               "diffeo_reg2": 0.,
-               "variance_logdet": 0.}
     # Generate data
     u, v = sp.symbols("u v", real=True)
     local_coordinates = sp.Matrix([u, v])
-    fuv = (u/10)**2+(v/10)**2
-    # sigma_2 = 5.5
-    # fuv = 0.5*sp.exp(-((u+3)**2+(v+3)**2)/(2*sigma_2))/(np.sqrt(2*np.pi*sigma_2))+0.5*sp.exp(-((u-3)**2+(v-3)**2)/(2*sigma_2))/(np.sqrt(2*np.pi*sigma_2))
+    fuv = (u/2)**2+(v/2)**2
     chart = sp.Matrix([u, v, fuv])
+
     print("Computing geometry...")
     manifold = RiemannianManifold(local_coordinates, chart)
+    # The local dynamics
     print("Computing drift...")
     local_drift = sp.Matrix([0,0])
     print("Computing diffusion...")
     local_diffusion = sp.eye(2,2)
 
+    # Generating the point cloud
     cloud = PointCloud(manifold, bounds, local_drift, local_diffusion)
     x, _, mu, cov, _ = cloud.generate(num_pts, seed=seed)
     x, mu, cov, p, orthogcomp, frame = process_data(x, mu, cov, d=2, return_frame=True)
     # Define model
-    ae = AutoEncoder1(3, 2, [8], nn.Tanh(), nn.Tanh())
+    ae = AutoEncoder1(3, 2, hidden_dims, nn.Tanh(), nn.Tanh())
     ae_loss = TotalLoss(weights)
+    # Print results
+    pre_train_losses = compute_test_losses(ae, ae_loss, x, p, frame, cov, mu)
+    print("\n Pre-training losses")
+    for key, value in pre_train_losses.items():
+        print(f"{key} = {value:.4f}")
+
     # Fit the model
     fit_model(ae, ae_loss, x, (p, frame, cov, mu), lr=lr, epochs=epochs, batch_size=batch_size)
     # Test data:
@@ -234,77 +267,30 @@ if __name__ == "__main__":
     x_test, _, mu_test, cov_test, _ = cloud.generate(num_test, seed=None)
     x_test, mu_test, cov_test, p_test, orthogcomp_test, frame_test = process_data(x_test, mu_test, cov_test, d=2,
                                                                                   return_frame=True)
-    x_test_recon = ae.decoder(ae.encoder(x_test))
-    print("Test reconstruction error = " + str(ae_loss.reconstruction_loss.forward(x_test_recon, x_test).item()))
-    # Compute individual losses on test data
-    targets_test = (p_test, frame_test, cov_test, mu_test)
-    decoder_jacobian_test = ae.decoder_jacobian(ae.encoder(x_test))
-    encoder_jacobian_test = ae.encoder_jacobian(x_test)
-    decoder_hessian_test = ae.decoder_hessian(ae.encoder(x_test))
-
-    # Contractive regularization
-    contractive_loss_test = ae_loss.contractive_reg(encoder_jacobian_test).item()
-    print(f"Test encoder contractive regularization error = {contractive_loss_test}")
-
-    contractive_loss_test = ae_loss.contractive_reg(decoder_jacobian_test).item()
-    print(f"Test decoder contractive regularization error = {contractive_loss_test}")
-
-    # Rank penalty
-    rank_penalty_test = ae_loss.rank_penalty(decoder_jacobian_test).item()
-    print(f"Test rank penalty error = {rank_penalty_test}")
-
-    metric_tensor_test = ae.neural_metric_tensor(ae.encoder(x_test))
-    tangent_bundle_loss_test = ae_loss.tangent_bundle_reg(decoder_jacobian_test, metric_tensor_test, p_test).item()
-    print(f"Test tangent bundle regularization error = {tangent_bundle_loss_test}")
-
-    # Drift alignment regularization
-    drift_alignment_loss_test = ae_loss.drift_alignment_reg(encoder_jacobian_test, decoder_hessian_test, cov_test,
-                                                            mu_test, frame_test).item()
-    print(f"Test drift alignment regularization error = {drift_alignment_loss_test}")
-
-    # Diffeomorphism regularization 1
-    diffeomorphism_loss1_test = ae_loss.diffeomorphism_reg1(decoder_jacobian_test, encoder_jacobian_test).item()
-    print(f"Test diffeomorphism regularization 1 error = {diffeomorphism_loss1_test}")
-
-    # Diffeomorphism regularization 2
-    diffeomorphism_loss2_test = ae_loss.diffeomorphism_reg2(decoder_jacobian_test, encoder_jacobian_test,
-                                                            metric_tensor_test).item()
-    print(f"Test diffeomorphism regularization 2 error = {diffeomorphism_loss2_test}")
+    # Print results
+    test_losses = compute_test_losses(ae, ae_loss, x_test, p_test, frame_test, cov_test, mu_test)
+    print("\n Test losses")
+    for key, value in test_losses.items():
+        print(f"{key} = {value:.4f}")
 
     # Detach and plot
     x = x.detach()
     x_test = x_test.detach()
-    fig = plt.figure()
-    ax = plt.subplot(111, projection="3d")
-    ax.scatter(x[:, 0], x[:, 1], x[:, 2])
-    ae.plot_surface(-1, 1, grid_size=30, ax=ax, title="ae")
+
+    # Create a single figure with two subplots side by side
+    fig = plt.figure(figsize=(20, 10))
+
+    # First subplot
+    ax1 = fig.add_subplot(121, projection="3d")
+    ax1.scatter(x[:, 0], x[:, 1], x[:, 2])
+    ae.plot_surface(-1, 1, grid_size=30, ax=ax1, title="ae - Training point cloud")
+
+    # Second subplot
+    ax2 = fig.add_subplot(122, projection="3d")
+    ax2.scatter(x_test[:, 0], x_test[:, 1], x_test[:, 2])
+    ae.plot_surface(-1, 1, grid_size=30, ax=ax2, title="ae - Test point cloud")
+
+    # Adjust the layout and display the plot
+    plt.tight_layout()
     plt.show()
 
-    fig = plt.figure()
-    ax = plt.subplot(111, projection="3d")
-    ax.scatter(x_test[:, 0], x_test[:, 1], x_test[:, 2])
-    ae.plot_surface(-1, 1, grid_size=30, ax=ax, title="ae")
-    plt.show()
-
-    # Plot SDEs
-    x0 = ae.encoder(x[0, :]).detach()
-    true_latent_paths = cloud.latent_sde.sample_ensemble(x0, tn, ntime, npaths)
-    # model_latent_paths = latent_sde.sample_paths(x0, tn, ntime, npaths)
-    true_ambient_paths = np.zeros((npaths, ntime + 1, 3))
-    # model_ambient_paths = np.zeros((npaths, ntime + 1, 3))
-
-    for j in range(npaths):
-        # model_ambient_paths[j, :, :] = ae.decoder(
-        #     torch.tensor(model_latent_paths[j, :, :], dtype=torch.float32)).detach().numpy()
-        for i in range(ntime + 1):
-            true_ambient_paths[j, i, :] = np.squeeze(cloud.np_phi(*true_latent_paths[j, i, :]))
-
-    fig = plt.figure()
-    ax = plt.subplot(111, projection="3d")
-    for i in range(npaths):
-        ax.plot3D(true_ambient_paths[i, :, 0], true_ambient_paths[i, :, 1], true_ambient_paths[i, :, 2], c="black",
-                  alpha=0.8)
-        # ax.plot3D(model_ambient_paths[i, :, 0], model_ambient_paths[i, :, 1], model_ambient_paths[i, :, 2], c="blue",
-        #           alpha=0.8)
-    ae.plot_surface(-1, 1, grid_size=30, ax=ax, title="New Model")
-    plt.show()

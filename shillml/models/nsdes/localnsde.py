@@ -1,12 +1,12 @@
 import torch.nn as nn
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 import torch
 import numpy as np
 from torch import Tensor
 
 
 from shillml.models.ffnn import FeedForwardNeuralNet
-from shillml.models.autoencoders import AutoEncoder
+from shillml.models.autoencoders import AutoEncoder, AutoEncoder1
 from shillml.sdes.sdes import SDE
 
 
@@ -83,7 +83,7 @@ def ambient_quadratic_variation_drift(latent_covariance: Tensor, decoder_hessian
 class AutoEncoderDiffusionGeometry(nn.Module):
     def __init__(self,
                  latent_sde: LatentNeuralSDE,
-                 ae: AutoEncoder,
+                 ae: Union[AutoEncoder, AutoEncoder1],
                  *args,
                  **kwargs):
         """
@@ -113,7 +113,7 @@ class AutoEncoderDiffusionGeometry(nn.Module):
         return lifted_ensemble
 
     def compute_sde_manifold_tensors(self, x: Tensor):
-        z = self.autoencoder.encoder(x)
+        z = self.autoencoder.encoder.forward(x)
         dphi = self.autoencoder.decoder_jacobian(z)
         latent_diffusion = self.latent_sde.diffusion(z)
         latent_covariance = torch.bmm(latent_diffusion, latent_diffusion.mT)
@@ -144,29 +144,32 @@ class AutoEncoderDiffusion(AutoEncoderDiffusionGeometry):
 
 class AutoEncoderDiffusion2(AutoEncoderDiffusionGeometry):
 
-    def __init__(self, latent_sde: LatentNeuralSDE, ae: AutoEncoder, *args, **kwargs):
+    def __init__(self, latent_sde: LatentNeuralSDE, ae: AutoEncoder1, *args, **kwargs):
         super().__init__(latent_sde, ae, *args, **kwargs)
 
-    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         z, dphi, b, q = self.compute_sde_manifold_tensors(x)
         bbt = torch.bmm(b, b.mT)
         # Normal Bundle Penalty
         g = torch.bmm(dphi.mT, dphi)
-        g_inv = torch.linalg.inv(g)
-        P = torch.bmm(torch.bmm(dphi, g_inv), dphi.mT)
-        N = torch.eye(self.extrinsic_dim).expand(x.shape[0], self.extrinsic_dim, self.extrinsic_dim) - P
+        # If we aren't using the model-OP onto normal space then we dont need any of this.
+        # g_inv = torch.linalg.inv(g)
+        # P = torch.bmm(torch.bmm(dphi, g_inv), dphi.mT)
+        # N = torch.eye(self.extrinsic_dim).expand(x.shape[0], self.extrinsic_dim, self.extrinsic_dim) - P
+        # # Exact normal term
+        # return dphi, g, N, q, bbt
         # Exact normal term
-        return dphi, g, N, q, bbt
+        return dphi, g, q, bbt
 
 
 class AutoEncoderDrift(AutoEncoderDiffusionGeometry):
 
-    def __init__(self, latent_sde: LatentNeuralSDE, ae: AutoEncoder, *args, **kwargs):
+    def __init__(self, latent_sde: LatentNeuralSDE, ae: Union[AutoEncoder1, AutoEncoder], *args, **kwargs):
         super().__init__(latent_sde, ae, *args, **kwargs)
 
     def forward(self, x: Tensor) -> Tensor:
         z, dphi, b, q = self.compute_sde_manifold_tensors(x)
-        a = self.latent_sde.drift_net(z)
+        a = self.latent_sde.drift_net.forward(z)
         tangent_drift = torch.bmm(dphi, a.unsqueeze(2)).squeeze()
         mu_model = tangent_drift + 0.5 * q
         return mu_model

@@ -9,21 +9,22 @@ if __name__ == "__main__":
     import numpy as np
     import matplotlib.pyplot as plt
     from shillml.utils import fit_model, fit_model2, process_data, set_grad_tracking, compute_test_losses
-    from shillml.losses.loss_modules import TotalLoss
+    from shillml.losses.loss_modules import TotalLoss, LossWeights
     from shillml.diffgeo import RiemannianManifold
     from shillml.pointclouds import PointCloud
     from shillml.models.autoencoders import AutoEncoder1
     from shillml.pointclouds.dynamics import SDECoefficients
+    from shillml.models.autoencoders.lae import computeW, pairwise_distances
     # weights
     # Inputs
-    train_seed = None
+    train_seed = 17
     norm = "fro"
     test_seed = None
     if train_seed is not None:
         torch.manual_seed(train_seed)
-    num_points = 200
-    batch_size = int(num_points/2)
-    num_test = 500
+    num_points = 30
+    batch_size = num_points
+    num_test = 100
     # Boundary for point cloud
     a = -3.5
     b = 3.5
@@ -32,7 +33,7 @@ if __name__ == "__main__":
     large_bounds = [(a - epsilon, b + epsilon), (a - epsilon, b + epsilon)]
     # Network architecture:
     input_dim, latent_dim = 3, 2
-    hidden_layers = [64]
+    hidden_layers = [32]
     encoder_act = nn.Tanh()
     decoder_act = nn.Tanh()
     # Learning rate schedule:
@@ -40,22 +41,10 @@ if __name__ == "__main__":
     scheduler_step_size = 2000  # The interval at which we reduce the learning rate
     gamma = 0.1  # The learning rate multiplicative decay factor
     # Training epochs
-    epochs_ae = 20000
-    # Regularizaiton weights
-    reconstruction_weight = 1.
-    contractive_weight = 0.
-    decoder_contractive_reg = 0.
-    tangent_drift_weight = 0.
-    tangent_bundle_weight = 0.
-    diffeo_weight1 = 0.
-    diffeo_weight2 = 0. # TODO this is based on a false premise--remove or change this reg.
-    rank_penalty = 0.  # Weight for rank-deficiency penalties
+    epochs_ae = 1000
     rank_scale = 1.5  # Right now this is the target min-SV
-    variance_log = 0.
-    orthogonal_weight = 0.
-    tangent_angles_weight = 0.02
-    normal_component_weight = 0.
     weight_decay = 0.
+    weights = LossWeights()
     # Flattening factors for manifold
     c1, c2 = 2, 2
 
@@ -69,7 +58,7 @@ if __name__ == "__main__":
     # fuv = u*v/c1
 
     # Paraboloid
-    # fuv = (u/c1)**2+(v/c2)**2
+    fuv = (u/c1)**2+(v/c2)**2
 
     # Hyperbolic paraboloid:
     # fuv = (u / c1) ** 2 - (v / c2) ** 2
@@ -80,10 +69,10 @@ if __name__ == "__main__":
     #        0.5 * sp.exp(-((u - 0.9) ** 2 + (v - 0.9) ** 2) / (2 * sigma_2)) / (np.sqrt(2 * np.pi * sigma_2)))
 
     # Creating the manifold from a graph of a function
-    # chart = sp.Matrix([u, v, fuv])
+    chart = sp.Matrix([u, v, fuv])
 
     # Sphere
-    chart = sp.Matrix([sp.sin(u)*sp.cos(v), sp.sin(u)*sp.sin(v), sp.cos(u)])
+    # chart = sp.Matrix([sp.sin(u)*sp.cos(v), sp.sin(u)*sp.sin(v), sp.cos(u)])
     #
     # # Torus:
     # R, r = 2, 1
@@ -150,28 +139,18 @@ if __name__ == "__main__":
     # print("Error of SVD-P versus true P")
     # print(torch.mean(torch.linalg.matrix_norm(p-p_true, ord="fro")))
 
+    # Compute graph laplacian / affinity matrix
+    dist = pairwise_distances(x)
+    affinity = computeW(dist, 0.01)
 
     # Define AE model
     ae = AutoEncoder1(input_dim, latent_dim, hidden_layers, encoder_act, decoder_act)
-    weights = {"reconstruction":reconstruction_weight,
-               "rank_penalty": rank_penalty,
-               "contractive_reg": contractive_weight,
-               "decoder_contractive_reg": decoder_contractive_reg,
-               "tangent_bundle": tangent_bundle_weight,
-               "drift_alignment": tangent_drift_weight,
-               "diffeo_reg1": diffeo_weight1,
-               "diffeo_reg2": diffeo_weight2,
-               "variance_logdet": variance_log,
-               "orthogonal": orthogonal_weight,
-               "tangent_angles": tangent_angles_weight,
-               "normal_component_recon": normal_component_weight}
-    ae_loss = TotalLoss(weights, norm, rank_scale)
+    ae_loss = TotalLoss(weights, norm, rank_scale, affinity=affinity)
     print("Pre-training losses")
     # Print results
     pre_train_losses = compute_test_losses(ae, ae_loss, x, p, orthonormal_frame, cov, mu)
     for key, value in pre_train_losses.items():
         print(f"{key} = {value:.4f}")
-
     print("\nTraining Autoencoder")
     # fit_model(ae, ae_loss, x, targets=(p, orthonormal_frame, cov, mu), lr=lr, epochs=epochs_ae,
     #           batch_size=batch_size, weight_decay=weight_decay)

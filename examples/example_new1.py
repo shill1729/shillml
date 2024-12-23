@@ -15,7 +15,7 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     from shillml.utils import fit_model, process_data, set_grad_tracking, compute_test_losses
     from shillml.losses import DiffusionLoss2, DriftMSELoss2
-    from shillml.losses.loss_modules import TotalLoss
+    from shillml.losses.loss_modules import TotalLoss, LossWeights
     from shillml.diffgeo import RiemannianManifold
     from shillml.pointclouds import PointCloud
     from shillml.models.autoencoders import AutoEncoder1
@@ -40,31 +40,26 @@ if __name__ == "__main__":
     large_bounds = [(a - epsilon, b + epsilon), (a - epsilon, b + epsilon)]
     input_dim, latent_dim = 3, 2
     hidden_layers = [32]
-    sde_layers = [64]
+    sde_layers = [8]
     encoder_act = nn.Tanh()
     decoder_act = nn.Tanh()
     drift_act = nn.GELU()
     diffusion_act = nn.GELU()
     lr = 0.001 # TODO learning rate schedule
     epochs_ae = 20000
-    epochs_diffusion = 30000
-    epochs_drift = 30000
+    epochs_diffusion = 50000
+    epochs_drift = 15000
     ntime = 8000
     npaths = 30
     tn = 0.5
-    contractive_weight = 0.
-    decoder_contractive_reg = 0.
-    tangent_drift_weight = 0.015
-    tangent_bundle_weight = 0.01
-    diffeo_weight1 = 0.
-    diffeo_weight2 = 0.
-    rank_penalty = 0.
+    weights = LossWeights()
+    weights.encoder_contraction_weight = 0.001
+    weights.tangent_angle_weight = 0.001
+    weights.tangent_drift_weight = 0.01
+    weight_decay = 0.0001
     rank_scale = 1.
-    variance_log = 0.
-    orthogonal_weight = 0.
-    weight_decay = 0.
     # Flattening factors
-    c1, c2 = 10, 10
+    c1, c2 = 5, 5
 
     # Define the manifold
     u, v = sp.symbols("u v", real=True)
@@ -89,12 +84,12 @@ if __name__ == "__main__":
     # local_drift = sp.Matrix([0, 0])
     # local_diffusion = sp.Matrix([[1, 0], [0, 1]])
     # RBM
-    # local_drift = manifold.local_bm_drift()
-    # local_diffusion = manifold.local_bm_diffusion()
+    local_drift = manifold.local_bm_drift()
+    local_diffusion = manifold.local_bm_diffusion()
     # # Langevin with double well potential
-    local_drift = manifold.local_bm_drift() - 0.2 * manifold.metric_tensor().inv() * sp.Matrix(
-        [4 * u * (u ** 2 - 1), 2 * v])
-    local_diffusion = manifold.local_bm_diffusion() * coefs.diffusion_circular()/5
+    # local_drift = manifold.local_bm_drift() - 0.2 * manifold.metric_tensor().inv() * sp.Matrix(
+    #     [4 * u * (u ** 2 - 1), 2 * v])
+    # local_diffusion = manifold.local_bm_diffusion() * coefs.diffusion_circular()/5
 
     # Generate the point cloud plus dynamics observations
     cloud = PointCloud(manifold, bounds, local_drift, local_diffusion, compute_orthogonal_proj=True)
@@ -109,16 +104,6 @@ if __name__ == "__main__":
 
     # Define AE model
     ae = AutoEncoder1(input_dim, latent_dim, hidden_layers, encoder_act, decoder_act)
-    weights = {"reconstruction": 1.,
-               "rank_penalty": rank_penalty,
-               "contractive_reg": contractive_weight,
-               "decoder_contractive_reg": decoder_contractive_reg,
-               "tangent_bundle": tangent_bundle_weight,
-               "drift_alignment": tangent_drift_weight,
-               "diffeo_reg1": diffeo_weight1,
-               "diffeo_reg2": diffeo_weight2,
-               "variance_logdet": variance_log,
-               "orthogonal": orthogonal_weight}
     ae_loss = TotalLoss(weights, norm, rank_scale)
     print("Pre-training losses")
     # Print results
@@ -139,7 +124,7 @@ if __name__ == "__main__":
     model_diffusion = AutoEncoderDiffusion2(latent_sde, ae)
     dpi = ae.encoder.jacobian_network(x).detach()
     encoded_cov = torch.bmm(torch.bmm(dpi, cov), dpi.mT)
-    diffusion_loss = DiffusionLoss2(tangent_drift_weight=tangent_drift_weight, norm=norm)
+    diffusion_loss = DiffusionLoss2(tangent_drift_weight=weights.tangent_drift_weight, norm=norm)
     print("\nTraining diffusion")
     fit_model(model_diffusion,
               diffusion_loss,

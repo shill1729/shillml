@@ -1,5 +1,3 @@
-# TODO add hypothesis testing for one tailed two sample test whether
-#  mu_recon - mu_tangent > 0 or not
 if __name__ == "__main__":
     import torch.nn as nn
     import torch

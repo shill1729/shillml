@@ -1,5 +1,5 @@
 """
-    A class implementation of a SDE.
+    A class implementation of a SDE using numpy.
 """
 from scipy.integrate import trapezoid
 import matplotlib.pyplot as plt
@@ -347,11 +347,11 @@ if __name__ == "__main__":
 
 
     def mu(t, x):
-        return 0.
+        return -x
 
 
     def sigma(t, x):
-        return np.eye(1)
+        return np.eye(1)*0.1
 
 
     def f(t, x):

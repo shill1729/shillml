@@ -50,7 +50,7 @@ def tangent_drift_loss(normal_projected_tangent_vector: Tensor) -> Tensor:
     Returns:
         Tensor: Normal bundle loss.
     """
-    normal_penalty = torch.mean(torch.linalg.vector_norm(normal_projected_tangent_vector, ord=2) ** 2)
+    normal_penalty = torch.mean(torch.linalg.vector_norm(normal_projected_tangent_vector, ord=2, dim=1) ** 2)
     return normal_penalty
 
 
@@ -553,7 +553,7 @@ class DiffusionLoss(nn.Module):
         # Add local cov mse
         local_cov_mse = self.local_cov_mse(bbt, encoded_cov)
         normal_bundle_loss = self.tangent_drift_loss(normal_proj_vector)
-        total_loss = cov_mse + local_cov_mse + self.tangent_drift_weight * normal_bundle_loss
+        total_loss = 0.5 * cov_mse + 0.5 * local_cov_mse + self.tangent_drift_weight * normal_bundle_loss
         return total_loss
 
 
@@ -616,7 +616,7 @@ class DiffusionLoss2(nn.Module):
         total_loss : Tensor
             The computed total loss combining covariance MSE, local covariance MSE, and weighted tangent drift loss.
         """
-        dphi, g, normal_proj, qv, bbt = ae_diffusion.forward(x)
+        dphi, g, qv, bbt = ae_diffusion.forward(x)
         ambient_drift, ambient_cov, encoded_cov, orthonormal_frame = targets
         tangent_vector = ambient_drift - 0.5 * qv
         orthonormal_frame_times_td = torch.bmm(orthonormal_frame.mT, tangent_vector.unsqueeze(2))
@@ -636,7 +636,110 @@ class DiffusionLoss2(nn.Module):
         # where X is the local model covariance bbt or
         # ||gXg - Dphi^T Sigma Dphi||_F^2
         frobenius_term = torch.mean(torch.norm(transformed_latent_cov - transformed_cov, p='fro') ** 2)
-        total_loss = local_cov_mse + self.tangent_drift_weight * normal_bundle_loss + 0.1*frobenius_term
+        total_loss = local_cov_mse + self.tangent_drift_weight * normal_bundle_loss + 0.1 * frobenius_term
+        return total_loss
+
+
+class DiffusionLoss3(nn.Module):
+    """
+        A custom loss function for training an AutoEncoderDiffusion model. This loss combines several components:
+        - Mean squared error (MSE) between the predicted covariance and the target covariance.
+        - A tangent drift loss that penalizes deviations in the normal projection of the drift vector.
+
+        The total loss is a weighted sum of these components, allowing for control over the influence of the tangent drift loss.
+
+        Parameters:
+        -----------
+        tangent_drift_weight : float, optional (default=0.0)
+            Weight applied to the tangent drift loss component.
+        norm : str, optional (default="fro")
+            Norm type to be used in the MSE loss calculations. The norm is applied when computing the matrix MSE.
+
+        Attributes:
+        -----------
+        tangent_drift_weight : float
+            Weight applied to the tangent drift loss component.
+        cov_mse : MatrixMSELoss
+            MSE loss instance for comparing model and target covariances in the ambient space.
+        tangent_drift_loss : function
+            Function used to calculate the tangent drift loss component.
+    """
+
+    def __init__(self, latent_cov_weight=0.5, ambient_cov_weight=0.5, tangent_drift_weight=0.0, norm="fro",
+                 normalize=False):
+        """
+
+        :param tangent_drift_weight: weight for the tangent drift alignment penalty
+        :param norm: matrix norm for the covariance error
+        """
+        super().__init__()
+        self.tangent_drift_weight = tangent_drift_weight
+        self.cov_mse = MatrixMSELoss(norm=norm)
+        self.tangent_drift_loss = tangent_drift_loss
+        self.latent_cov_weight = latent_cov_weight
+        self.ambient_cov_weight = ambient_cov_weight
+        self.normalize = normalize
+
+    def forward(self, ae_diffusion: AutoEncoderDiffusion2, x, targets):
+        """
+        Computes the total loss for the AutoEncoderDiffusion model.
+
+        Parameters:
+        -----------
+        ae_diffusion : AutoEncoderDiffusion
+            The AutoEncoderDiffusion model whose output is being evaluated.
+        x : Tensor
+            Input tensor to the autoencoder.
+        targets : tuple of Tensors
+            A tuple containing the target ambient drift vector, target ambient covariance matrix,
+            and target encoded covariance matrix (mu, cov, encoded_cov, H, N).
+
+        Returns:
+        --------
+        total_loss : Tensor
+            The computed total loss combining covariance MSE, local covariance MSE, and weighted tangent drift loss.
+        """
+        dphi, g, qv, bbt = ae_diffusion.forward(x)
+        ambient_drift, ambient_cov, encoded_cov, orthonormal_frame = targets
+
+        tangent_vector = ambient_drift - 0.5 * qv
+        if self.normalize:
+            tangent_vector = tangent_vector / torch.linalg.vector_norm(tangent_vector, ord=2, dim=1, keepdim=True)
+
+        htv = torch.bmm(orthonormal_frame.mT, tangent_vector.unsqueeze(2))
+        hhtv = torch.bmm(orthonormal_frame, htv).squeeze(2)
+        # This is equivalent to N(mu-0.5 q). It is just v-HH^T v where v = mu-0.5 q.
+        normal_proj_vector = tangent_vector - hhtv
+        tangent_drift_penalty = torch.mean(torch.linalg.vector_norm(normal_proj_vector, ord=2, dim=1) ** 2)
+        model_cov = torch.bmm(dphi, bbt)
+        model_cov = torch.bmm(model_cov, dphi.mT)
+        cov_mse = self.cov_mse(model_cov, ambient_cov)
+        local_cov_mse = self.cov_mse(bbt, encoded_cov)
+        total_loss = self.ambient_cov_weight * cov_mse
+        total_loss += self.latent_cov_weight * local_cov_mse
+        total_loss += self.tangent_drift_weight * tangent_drift_penalty
+        return total_loss
+
+
+class LatentDiffusionLoss(nn.Module):
+    def __init__(self, tangent_drift_weight=0., norm="fro", *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.tangent_drift_weight = tangent_drift_weight
+        self.cov_mse = MatrixMSELoss(norm=norm)
+        self.tangent_drift_loss = tangent_drift_loss
+
+    def forward(self, ae_diffusion: AutoEncoderDiffusion2, x, targets):
+        dphi, g, qv, bbt = ae_diffusion.forward(x)
+        ambient_drift, ambient_cov, encoded_cov, orthonormal_frame = targets
+        tangent_vector = ambient_drift - 0.5 * qv
+        htv = torch.bmm(orthonormal_frame.mT, tangent_vector.unsqueeze(2))
+        hhtv = torch.bmm(orthonormal_frame, htv).squeeze(2)
+        normal_proj_vector = tangent_vector - hhtv
+        tangent_drift_penalty = torch.mean(torch.linalg.vector_norm(normal_proj_vector, ord=2, dim=1) ** 2)
+        model_cov = torch.bmm(dphi, bbt)
+        model_cov = torch.bmm(model_cov, dphi.mT)
+        cov_mse = self.cov_mse(model_cov, ambient_cov)
+        total_loss = cov_mse + self.tangent_drift_weight * tangent_drift_penalty
         return total_loss
 
 
@@ -766,3 +869,109 @@ class DriftMSELoss2(nn.Module):
         g_latent_drift = torch.bmm(g, latent_drift.unsqueeze(2)).squeeze(2)
         latent_error = torch.mean(torch.linalg.vector_norm(g_latent_drift - true_latent_drift, ord=2, dim=1) ** 2)
         return latent_error
+
+
+class DriftMSELoss3(nn.Module):
+    """
+    A custom loss function for training an AutoEncoderDrift model. This loss function computes:
+    - Mean squared error (MSE) between the model-predicted ambient drift and the observed ambient drift.
+
+    Parameters:
+    -----------
+    None. Inherits from nn.Module.
+
+    Methods:
+    --------
+    forward(drift_model: AutoEncoderDrift, x: Tensor, targets: Tuple[Tensor, Tensor]) -> Tensor
+        Computes the loss given the input data, the drift model, and the target drift and covariance.
+    """
+
+    def __init__(self, *args, **kwargs):
+        """
+
+        :param args:
+        :param kwargs:
+        """
+        super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def forward(drift_model: AutoEncoderDrift, x: Tensor,
+                targets: Tuple[Tensor, Tensor]) -> Tensor:
+        """
+        Computes the loss for the AutoEncoderDrift model.
+
+        Parameters:
+        -----------
+        drift_model : AutoEncoderDrift
+            The AutoEncoderDrift model whose output is being evaluated.
+        x : Tensor
+            Input tensor to the autoencoder.
+        targets : tuple of Tensors
+            A tuple containing the observed ambient drift vector and the target encoded covariance matrix
+            (mu, encoded_cov).
+
+        Returns:
+        --------
+        loss : Tensor
+            The computed loss combining ambient drift error and latent drift error.
+        """
+        observed_ambient_drift, encoded_cov = targets
+        model_ambient_drift = drift_model(x)
+        ambient_sq_error = torch.linalg.vector_norm(model_ambient_drift - observed_ambient_drift, ord=2, dim=1) ** 2
+        ambient_drift_mse = torch.mean(ambient_sq_error)
+        return ambient_drift_mse
+
+
+class LatentDriftMSE(nn.Module):
+    """
+    A custom loss function for training an AutoEncoderDrift model. This loss function computes:
+    - Mean squared error (MSE) between the model-predicted latent drift and the observed latent drift, encoded
+
+    Parameters:
+    -----------
+    None. Inherits from nn.Module.
+
+    Methods:
+    --------
+    forward(drift_model: AutoEncoderDrift, x: Tensor, targets: Tuple[Tensor, Tensor]) -> Tensor
+        Computes the loss given the input data, the drift model, and the target drift and covariance.
+    """
+
+    def __init__(self, *args, **kwargs):
+        """
+
+        :param args:
+        :param kwargs:
+        """
+        super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def forward(drift_model: AutoEncoderDrift, x: Tensor,
+                targets: Tuple[Tensor, Tensor]) -> Tensor:
+        """
+        Computes the loss for the AutoEncoderDrift model.
+
+        Parameters:
+        -----------
+        drift_model : AutoEncoderDrift
+            The AutoEncoderDrift model whose output is being evaluated.
+        x : Tensor
+            Input tensor to the autoencoder.
+        targets : tuple of Tensors
+            A tuple containing the observed ambient drift vector and the target encoded covariance matrix
+            (mu, encoded_cov).
+
+        Returns:
+        --------
+        loss : Tensor
+            The computed loss combining ambient drift error and latent drift error.
+        """
+        observed_ambient_drift, _ = targets
+        z, _, _, q = drift_model.compute_sde_manifold_tensors(x)
+        model_latent_drift = drift_model.latent_sde.drift_net.forward(z)
+        dpi = drift_model.autoencoder.encoder_jacobian(x)
+        tangent_drift_vector = observed_ambient_drift - 0.5 * q
+        observed_latent_drift = torch.bmm(dpi, tangent_drift_vector.unsqueeze(2)).squeeze(2)
+        latent_sq_error = torch.linalg.vector_norm(model_latent_drift - observed_latent_drift, ord=2, dim=1) ** 2
+        latent_drift_mse = torch.mean(latent_sq_error)
+        return latent_drift_mse

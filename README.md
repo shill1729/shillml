@@ -28,13 +28,14 @@ Features:
 ```python
 import torch
 import torch.nn.functional as F
-from shillml.ffnn import FeedForwardNeuralNet, get_device
+from shillml.models.ffnn import FeedForwardNeuralNet
+from shillml.utils import select_device
 # Define a network with 2 input neurons, 3 hidden neurons, and 1 output neuron
 neurons = [2, 3, 1]
 activations = [F.tanh, F.tanh, None]
 net = FeedForwardNeuralNet(neurons, activations)
 # Set device
-device = get_device("cpu")
+device = select_device("cpu")
 net.to(device)
 # Forward pass
 x = torch.tensor([[1.0, 2.0]], requires_grad=True).to(device)
@@ -82,8 +83,8 @@ divergence of a vector field $f$ is $\nabla_g \cdot f = (1/\sqrt{\det g}) \nabla
 where $\nabla \cdot h$ is the ordinary Euclidean divergence of the vector field $h$.
 ```python
 import  matplotlib.pyplot as plt
-from shillml.sde_cas import *
-from shillml.solvers import euler_maruyama
+from shillml.sdes.sde_cas import *
+from shillml.sdes.solvers import euler_maruyama
 
 # sympy input
 t, x, y = sp.symbols("t x y", real=True)
@@ -280,7 +281,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from shillml.sdes import SDE
-from shillml.neuralsdes import NeuralSDE
+from shillml.models.nsdes import NeuralSDE
 
 x00 = [0.5]
 x0 = torch.tensor(x00, dtype=torch.float32)

@@ -10,14 +10,19 @@ if __name__ == "__main__":
 
     u, v = sp.symbols("u v", real=True)
     local_coord = sp.Matrix([u, v])
+    # Sphere
     chart = sp.Matrix([sin(u)*cos(v), sin(u)*sin(v), cos(u)])
+    # Product
+    # chart = sp.Matrix([u, v, u*v/5])
+    # Rational function
+    # chart = sp.Matrix([u, v, (u+v)/(1+u**2+v**2)])
     man = RiemannianManifold(local_coord, chart)
     tn = 3.5
     npaths = 10
     ntime = 15000
     x0 = np.array([1., 1.])
     print("Simulating paths...")
-    # local_paths, global_paths = man.simulate_rbm(x0, tn, ntime, npaths)
+    local_paths, global_paths = man.simulate_rbm(x0, tn, ntime, npaths)
     # man.plot_rbm(local_paths, global_paths)
 
     print("\nChart Jacobian:")

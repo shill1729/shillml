@@ -9,9 +9,12 @@ import numpy as np
 
 
 class PointCloud:
-    def __init__(self, manifold: RiemannianManifold, bounds: List[Tuple],
-                 local_drift: sp.Matrix = None, local_diffusion: sp.Matrix = None, compute_orthogonal_proj=False):
-
+    def __init__(self,
+                 manifold: RiemannianManifold,
+                 bounds: List[Tuple],
+                 local_drift: sp.Matrix = None,
+                 local_diffusion: sp.Matrix = None,
+                 compute_orthogonal_proj=False):
         """
                 Initialize the PointCloud object.
 

@@ -5,6 +5,7 @@
 
     set_grad_tracking: turn on/off the parameters of a nn.Module
     select_device: choose the computational device: cpu or gpu (cuda, or mps)
+    process_data: take the point cloud/dynamics data and estimate the orthogonal projection
 
 """
 from typing import Union, List, Tuple, Optional
@@ -194,6 +195,8 @@ def select_device(preferred_device=None):
 
 
 def compute_test_losses(ae: AutoEncoder1, ae_loss: TotalLoss, x_test, p_test, frame_test, cov_test, mu_test):
+    n, D, _ = p_test.size()
+    normal_proj_test = torch.eye(D).expand(n, D, D) - p_test
     # Get reconstructed test data
     x_test_recon = ae.decoder(ae.encoder(x_test))
 
@@ -213,18 +216,19 @@ def compute_test_losses(ae: AutoEncoder1, ae_loss: TotalLoss, x_test, p_test, fr
 
     # Neural metric tensor
     metric_tensor_test = torch.bmm(decoder_jacobian_test.mT, decoder_jacobian_test)
-
-    tangent_bundle_loss_test = ae_loss.tangent_bundle_reg.forward(decoder_jacobian_test, metric_tensor_test, p_test).item()
+    # Tangent error
+    tangent_bundle_loss_test = ae_loss.tangent_bundle_reg.forward(decoder_jacobian_test,
+                                                                  metric_tensor_test,
+                                                                  p_test).item()
     # Drift alignment regularization
-    drift_alignment_loss_test = ae_loss.drift_alignment_reg(
-        encoder_jacobian_test, decoder_hessian_test, cov_test, mu_test, frame_test).item()
+    drift_alignment_loss_test = ae_loss.drift_alignment_reg.forward(encoder_jacobian_test,
+                                                                    decoder_hessian_test,
+                                                                    cov_test,
+                                                                    mu_test,
+                                                                    normal_proj_test).item()
 
     # Diffeomorphism regularization 1
     diffeomorphism_loss1_test = ae_loss.diffeomorphism_reg1(decoder_jacobian_test, encoder_jacobian_test).item()
-
-    # Diffeomorphism regularization 2
-    diffeomorphism_loss2_test = ae_loss.diffeomorphism_reg2(
-        decoder_jacobian_test, encoder_jacobian_test, metric_tensor_test).item()
 
     variance_logdet_loss = ae_loss.variance_log_det_reg(metric_tensor_test).item()
 
@@ -243,13 +247,12 @@ def compute_test_losses(ae: AutoEncoder1, ae_loss: TotalLoss, x_test, p_test, fr
         "decoder contractive loss": decoder_contraction,
         "rank penalty": rank_penalty_test,
         "tangent bundle loss": tangent_bundle_loss_test,
-        "drift alignment loss": drift_alignment_loss_test,
-        "diffeomorphism loss1": diffeomorphism_loss1_test,
-        "diffeomorphism loss2": diffeomorphism_loss2_test,
-        "variance logdetg loss": variance_logdet_loss,
-        "orthogonal coordinate loss": orthogonal_coordinates_error,
         "tangent angle loss": tangent_angle_loss,
-        "normal component loss": normal_component_loss
+        "normal component loss": normal_component_loss,
+        "tangent drift alignment loss": drift_alignment_loss_test,
+        "diffeomorphism loss1": diffeomorphism_loss1_test,
+        "variance logdetg loss": variance_logdet_loss,
+        "orthogonal coordinate loss": orthogonal_coordinates_error
     }
 
 
